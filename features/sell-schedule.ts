@@ -1,5 +1,5 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, Client, Message, TextChannel } from 'discord.js'
-// @ts-ignore
+import { CalendarEvent, google, ics } from 'calendar-link'
 import sellChannels from '../constants/sellChannels.ts'
 import Queue from 'queue'
 
@@ -183,8 +183,25 @@ export default function (client: Client, scheduleChannelIds: [{ id: string; regi
             content: "You didn't sign up to anything!",
           })
         } else {
+          const content = []
+          // const files = []
+          for (let i = 0; i < result.length; i++) {
+            const event = createCalendarEventFromMessage(result[i])
+
+            const googleLink = google(event)
+            // const icsData = ics(event)
+            // const icsFile = new AttachmentBuilder(Buffer.from(new TextEncoder().encode(icsData)), { name: 'event.ics' })
+
+            let prunedOutput = getPrunedOutput([result[i]], true)[0]
+
+            prunedOutput[0] += `\n[Add to Google Calendar](<${googleLink}>)`
+
+            content.push(prunedOutput)
+            // files.push(icsFile)
+          }
           await interaction.editReply({
-            content: getPrunedOutput(result, true)[0].join('\r\n\r\n'),
+            content: content.join('\r\n\r\n'),
+            // files: files,
           })
         }
       }
@@ -419,41 +436,16 @@ function getPrunedOutput(history: ScheduleMessage[], addSubtext = false) {
   return result.output
 }
 
-function getTimestampMatch(messageText: string) {
-  // Regex to match the timestamp pattern <t:number:format>
-  const pattern = /<t:(\d+):[a-zA-Z]>/
-  return messageText.match(pattern)
-}
+function createCalendarEventFromMessage(message: ScheduleMessage): CalendarEvent {
+  const date = new Date(message.date * 1000)
+  const duration = 30
 
-function extractTimeText(match: RegExpMatchArray | null) {
-  if (match) {
-    // Extract the whole timestamp
-    return match[0]
-  } else {
-    return '0'
+  return {
+    title: message.text,
+    description: message.text + '\n' + message.url,
+    start: date,
+    duration: [duration, 'minutes'],
   }
-}
-
-function extractTimestamp(match: RegExpMatchArray | null) {
-  if (match) {
-    // Extract the numeric part of the timestamp
-    const timestamp = parseInt(match[1], 10)
-
-    return timestamp
-  } else {
-    return 0
-  }
-}
-
-function getSortedMessage(message: Message<boolean>, timeText: string) {
-  // Sort the content message to have the time at the beginning
-  if (timeText === '0') {
-    // some weird input, do not manipulate text
-    return message.content
-  }
-
-  const messageWithoutTime = message.content.replace(timeText, '')
-  return timeText.trim() + ' ' + messageWithoutTime.trim() + ' ' + message.url
 }
 
 type ScheduleMessage = {
