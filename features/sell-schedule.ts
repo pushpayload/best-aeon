@@ -1,9 +1,10 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, Client, Message, TextChannel } from 'discord.js'
 // @ts-ignore
-import sellChannels from '../constants/sellChannels.js'
+import sellChannels from '../constants/sellChannels.ts'
 import Queue from 'queue'
 
 const MCMysticCoinEmoji = '545057156274323486'
+const discordTimeStampRegex = /(?<before>.*)<t:(?<timestamp>\d+):[dDtTfFR]>(?<after>.*)/gm
 
 export default function (client: Client, scheduleChannelIds: [{ id: string; regions: string[] }]) {
   const q = new Queue({ autostart: true, concurrency: 1 })
@@ -36,7 +37,7 @@ export default function (client: Client, scheduleChannelIds: [{ id: string; regi
         if (sellChannel && sellChannel instanceof TextChannel) {
           let sellMessages = await sellChannel.messages
             .fetch()
-            .then((messages) => messages.filter((message) => message.content.includes('<t:')))
+            .then((messages) => messages.filter((message) => isSellMessage(message)))
 
           if (sellMessages) {
             for (const sellMessage of sellMessages.values()) {
@@ -78,7 +79,7 @@ export default function (client: Client, scheduleChannelIds: [{ id: string; regi
       const region = sellChannels[message.channelId]?.region
 
       if (region) {
-        if (message.content.includes('<t:')) {
+        if (isSellMessage(message)) {
           await addToSchedule(message)
 
           await createMessages()
@@ -127,11 +128,10 @@ export default function (client: Client, scheduleChannelIds: [{ id: string; regi
         updatedMessage = await updatedMessage.fetch()
       }
 
-      const match = getTimestampMatch(updatedMessage.content)
-      const timeText = extractTimeText(match)
-      const timestamp = extractTimestamp(match)
-      schedule[messageIndex].date = timestamp
-      schedule[messageIndex].text = getSortedMessage(updatedMessage, timeText)
+      const parsedMessage = await parseScheduleMessage(updatedMessage)
+
+      schedule[messageIndex].date = parsedMessage.date
+      schedule[messageIndex].text = parsedMessage.text
 
       // TODO: Only update the channels that are relevant.
       await createMessages()
@@ -142,7 +142,7 @@ export default function (client: Client, scheduleChannelIds: [{ id: string; regi
           updatedMessage = await updatedMessage.fetch()
         }
 
-        if (updatedMessage.content.includes('<t:')) {
+        if (isSellMessage(updatedMessage)) {
           await addToSchedule(updatedMessage)
 
           await createMessages()
@@ -227,10 +227,30 @@ export default function (client: Client, scheduleChannelIds: [{ id: string; regi
     }
   })
 
+  function isSellMessage(message: Message<boolean>): boolean {
+    const match = message.content.match(discordTimeStampRegex)
+    if (!match) {
+      return false
+    }
+    if (match.groups?.before === '' && match.groups?.after === '') {
+      return false
+    }
+    return true
+  }
+
   async function addToSchedule(message: Message<boolean>) {
-    const match = getTimestampMatch(message.content)
-    const timeText = extractTimeText(match)
-    const timestamp = extractTimestamp(match)
+    const scheduleMessage = await parseScheduleMessage(message)
+    schedule.push(scheduleMessage)
+  }
+
+  async function parseScheduleMessage(message: Message<boolean>): Promise<ScheduleMessage> {
+    const regex = /(?<before>.*)<t:(?<timestamp>\d+):[dDtTfFR]>(?<after>.*)/gm
+    const matches = regex.exec(message.content)
+    const groups = matches?.groups
+    const timestamp: number = parseInt(matches?.groups?.timestamp ?? '0')
+    const timeText: string =
+      (matches?.groups?.before?.toString().trim() ?? '') + ' ' + (matches?.groups?.after?.toString().trim() ?? '')
+
     let userIds: string[] = []
 
     let messageReaction = message.reactions.cache.get(MCMysticCoinEmoji)
@@ -246,14 +266,26 @@ export default function (client: Client, scheduleChannelIds: [{ id: string; regi
       })
     }
 
-    schedule.push({
+    const scheduleMessage: ScheduleMessage = {
       id: message.id,
       channelId: message.channelId,
-      region: sellChannels[message.channelId].region,
       reactors: userIds,
+      region: sellChannels[message.channelId].region,
       date: timestamp,
-      text: getSortedMessage(message, timeText),
-    })
+      text: timeText.replaceAll('@everyone', '').replaceAll('@', '').replaceAll('  ', ' ').trim(),
+      url: message.url,
+    }
+
+    if (process.env.DEV === 'true') {
+      console.log('Adding to schedule: ', message.content)
+      console.log('Matches: ', JSON.stringify(matches))
+      console.log('Groups: ', JSON.stringify(groups))
+      console.log('Time text: ', timeText)
+      console.log('Timestamp: ', timestamp)
+      console.log('ScheduleMessage: ', scheduleMessage)
+    }
+
+    return scheduleMessage
   }
 
   async function createMessages() {
@@ -309,6 +341,7 @@ export default function (client: Client, scheduleChannelIds: [{ id: string; regi
           .setCustomId(`my-schedule-${channelInfo.regions.join('-')}`)
           .setLabel('My Schedule')
           .setStyle(ButtonStyle.Primary)
+          .setEmoji('📅')
 
         const row = new ActionRowBuilder<ButtonBuilder>().addComponents(myScheduleButton)
 
@@ -338,7 +371,7 @@ function getPrunedOutput(history: ScheduleMessage[], addSubtext = false) {
 
   const result = history.reduce<{ length: number; position: number; output: string[][] }>(
     (cum, message, index) => {
-      const newText = message.text.replaceAll('@everyone', '').replaceAll('@', '').replaceAll('  ', ' ').trim()
+      const newText = '<t:' + message.date + ':F> ' + message.text + ' ' + message.url
 
       if (hasAddedSubText) {
         return cum
@@ -430,6 +463,7 @@ type ScheduleMessage = {
   region: string
   date: number
   text: string
+  url: string
 }
 
 const NO_SELLS_COMMENTS = [
