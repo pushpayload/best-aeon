@@ -1,10 +1,19 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, Client, Message, TextChannel } from 'discord.js'
+import {
+  ActionRowBuilder,
+  AttachmentBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  Client,
+  Message,
+  TextChannel,
+} from 'discord.js'
 import { CalendarEvent, google, ics } from 'calendar-link'
 import sellChannels from '../constants/sellChannels.ts'
 import Queue from 'queue'
 
-const MCMysticCoinEmoji = '545057156274323486'
-const discordTimeStampRegex = /(?<before>.*)<t:(?<timestamp>\d+):[dDtTfFR]>(?<after>.*)/gm
+const MCMysticCoinEmoji: string = '545057156274323486'
+const GCalEmoji: string = '1274033711607844905'
+const discordTimeStampRegex: RegExp = /(?<before>.*)<t:(?<timestamp>\d+):[dDtTfFR]>(?<after>.*)/gm
 
 export default function (client: Client, scheduleChannelIds: [{ id: string; regions: string[] }]) {
   const q = new Queue({ autostart: true, concurrency: 1 })
@@ -32,6 +41,7 @@ export default function (client: Client, scheduleChannelIds: [{ id: string; regi
       }
 
       for (const sellChannelId in sellChannels) {
+        console.log(`sellChannelId: ${sellChannelId}, region: ${sellChannels[sellChannelId].region}`)
         const sellChannel = await client.channels.fetch(sellChannelId)
 
         if (sellChannel && sellChannel instanceof TextChannel) {
@@ -128,7 +138,7 @@ export default function (client: Client, scheduleChannelIds: [{ id: string; regi
         updatedMessage = await updatedMessage.fetch()
       }
 
-      const parsedMessage = await parseScheduleMessage(updatedMessage)
+      const parsedMessage: ScheduleMessage = await parseScheduleMessage(updatedMessage)
 
       schedule[messageIndex].date = parsedMessage.date
       schedule[messageIndex].text = parsedMessage.text
@@ -175,33 +185,18 @@ export default function (client: Client, scheduleChannelIds: [{ id: string; regi
         const regions = id.replace('my-schedule-', '').split('-')
 
         const result = schedule.filter((message) => {
-          return message.reactors.includes(interaction.user.id) && regions.includes(message.region)
+          return message.reactorIds.includes(interaction.user.id) && regions.includes(message.region)
         })
+
+        console.log(`Found ${result.length} items for user ${interaction.user.id}, result: ${JSON.stringify(result)}`)
 
         if (!result.length) {
           await interaction.editReply({
             content: "You didn't sign up to anything!",
           })
         } else {
-          const content = []
-          // const files = []
-          for (let i = 0; i < result.length; i++) {
-            const event = createCalendarEventFromMessage(result[i])
-
-            const googleLink = google(event)
-            // const icsData = ics(event)
-            // const icsFile = new AttachmentBuilder(Buffer.from(new TextEncoder().encode(icsData)), { name: 'event.ics' })
-
-            let prunedOutput = getPrunedOutput([result[i]], true)[0]
-
-            prunedOutput[0] += `\n[Add to Google Calendar](<${googleLink}>)`
-
-            content.push(prunedOutput)
-            // files.push(icsFile)
-          }
           await interaction.editReply({
-            content: content.join('\r\n\r\n'),
-            // files: files,
+            content: getPrunedOutput(result, true, true)[0].join('\r\n\r\n'),
           })
         }
       }
@@ -227,7 +222,7 @@ export default function (client: Client, scheduleChannelIds: [{ id: string; regi
       return
     }
 
-    matchingHistoryItem.reactors.push(user.id)
+    matchingHistoryItem.reactorIds.push(user.id)
   })
 
   client.on('messageReactionRemove', async (reaction, user) => {
@@ -237,10 +232,10 @@ export default function (client: Client, scheduleChannelIds: [{ id: string; regi
       return
     }
 
-    const index = matchingHistoryItem.reactors.indexOf(user.id)
+    const index = matchingHistoryItem.reactorIds.indexOf(user.id)
     if (index > -1) {
       // only splice array when item is found
-      matchingHistoryItem.reactors.splice(index, 1) // 2nd parameter means remove one item only
+      matchingHistoryItem.reactorIds.splice(index, 1) // 2nd parameter means remove one item only
     }
   })
 
@@ -256,7 +251,7 @@ export default function (client: Client, scheduleChannelIds: [{ id: string; regi
   }
 
   async function addToSchedule(message: Message<boolean>) {
-    const scheduleMessage = await parseScheduleMessage(message)
+    const scheduleMessage: ScheduleMessage = await parseScheduleMessage(message)
     schedule.push(scheduleMessage)
   }
 
@@ -286,12 +281,16 @@ export default function (client: Client, scheduleChannelIds: [{ id: string; regi
     const scheduleMessage: ScheduleMessage = {
       id: message.id,
       channelId: message.channelId,
-      reactors: userIds,
+      reactorIds: userIds,
+      reactorNames: userIds.map((id) => {
+        return client.users.cache.get(id)?.username ?? 'Unknown'
+      }),
       region: sellChannels[message.channelId].region,
       date: timestamp,
       text: timeText.replaceAll('@everyone', '').replaceAll('@', '').replaceAll('  ', ' ').trim(),
       url: message.url,
     }
+    scheduleMessage.calendarEvent = createCalendarEventFromMessage(scheduleMessage)
 
     if (process.env.DEV === 'true') {
       console.log('Adding to schedule: ', message.content)
@@ -381,14 +380,14 @@ export default function (client: Client, scheduleChannelIds: [{ id: string; regi
   }
 }
 
-function getPrunedOutput(history: ScheduleMessage[], addSubtext = false) {
+function getPrunedOutput(history: ScheduleMessage[], addSubtext = false, includeCalendarLink = false): string[][] {
   history.sort((a, b) => a.date - b.date)
 
   let hasAddedSubText = false
 
   const result = history.reduce<{ length: number; position: number; output: string[][] }>(
     (cum, message, index) => {
-      const newText = '<t:' + message.date + ':F> ' + message.text + ' ' + message.url
+      const newText = `<t:${message.date}:F> ${message.text} ${message.url} ${includeCalendarLink && message.calendarEvent ? `[<:google_calendar:${GCalEmoji}>](<${google(message.calendarEvent)}>)` : ''}`
 
       if (hasAddedSubText) {
         return cum
@@ -442,20 +441,25 @@ function createCalendarEventFromMessage(message: ScheduleMessage): CalendarEvent
 
   return {
     title: message.text,
-    description: message.text + '\n' + message.url,
+    // description: `<h3><a href="${message.url}">${message.text}</a></h3>\n<b>Signups:</b> ${message.reactorNames.join(', ')}\n\n<b>Region:</b> ${message.region}\n\n<i>Calendar event generated at ${new Date().toTimeString()}</i>`,
     start: date,
     duration: [duration, 'minutes'],
+    location: message.region,
+    // url: message.url,
+    // guests: message.reactorNames,
   }
 }
 
 type ScheduleMessage = {
   id: string
   channelId: string
-  reactors: string[]
+  reactorIds: string[]
+  reactorNames: string[]
   region: string
   date: number
   text: string
   url: string
+  calendarEvent?: CalendarEvent
 }
 
 const NO_SELLS_COMMENTS = [
