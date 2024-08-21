@@ -18,6 +18,7 @@ import {
 } from 'discord.js'
 import translations from '../constants/translations.ts'
 import { Language } from '../constants/buyerManagementLanguages.ts'
+import { Logger } from '../helpers/logger.ts'
 
 interface LanguageByChannel {
   [key: string]: string
@@ -26,6 +27,8 @@ interface LanguageByChannel {
 interface PingByUser {
   [key: string]: number
 }
+
+const logger = new Logger({ functionName: 'BuyerManagement' })
 
 export default function setup() {
   const contactedCategoryChannelId = process.env.CONTACTED_CATEGORY_CHANNEL_ID!
@@ -51,7 +54,7 @@ export default function setup() {
   client.login(process.env.MANAGER_TOKEN)
 
   client.once('ready', () => {
-    console.log(`Logged in as ${client.user?.tag}`)
+    logger.info(`Logged in as ${client.user?.tag}`)
   })
 
   client.on('guildMemberAdd', async (member) => {
@@ -76,7 +79,7 @@ export default function setup() {
         const c = categoryChannels.at(index)
 
         if (!c) {
-          console.error('--- ERROR: Ran out of channels to put new members under! ---')
+          logger.error('--- ERROR: Ran out of channels to put new members under! ---')
           return
         }
 
@@ -98,7 +101,7 @@ export default function setup() {
       }
 
       if (!channel) {
-        console.error(`--- Failed to create channel for user! ${member.displayName} ---`)
+        logger.error(`--- Failed to create channel for user! ${member.displayName} ---`)
         return
       }
 
@@ -124,8 +127,8 @@ I am a bot, here to assist you in finding and purchasing Guild Wars 2 services. 
         components: [languageRow],
       })
     } catch (e) {
-      console.error(`--- something failed when setting up for ${member.displayName} ---`)
-      console.error(e)
+      logger.error(`--- something failed when setting up for ${member.displayName} ---`)
+      logger.error(e)
     }
   })
 
@@ -146,7 +149,7 @@ I am a bot, here to assist you in finding and purchasing Guild Wars 2 services. 
       })
 
       if (!userChannel) {
-        console.log(`${member.user.displayName} left but could not find a channel for them.`)
+        logger.log(`${member.user.displayName} left but could not find a channel for them.`)
         return
       }
 
@@ -174,7 +177,7 @@ I am a bot, here to assist you in finding and purchasing Guild Wars 2 services. 
         })
       }
     } catch (e) {
-      console.error(e)
+      logger.error(e)
     }
   })
 
@@ -272,8 +275,8 @@ I am a bot, here to assist you in finding and purchasing Guild Wars 2 services. 
         return
       }
     } catch (e: any) {
-      console.error(e.rawError?.message || 'Something went wrong?')
-      console.error(e)
+      logger.error(e.rawError?.message || 'Something went wrong?')
+      logger.error(e)
 
       try {
         interaction.reply({
@@ -282,7 +285,7 @@ I am a bot, here to assist you in finding and purchasing Guild Wars 2 services. 
         })
         return
       } catch {
-        console.error('--- ERROR: Was not allowed to reply to interaction ---')
+        logger.error('--- ERROR: Was not allowed to reply to interaction ---')
       }
     }
   })
