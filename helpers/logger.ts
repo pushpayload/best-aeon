@@ -3,19 +3,19 @@ config()
 
 /**
  * Enum to represent the log levels.
- * @enum {number}
+ * @enum {number} LogLevel
  * @readonly
  * @example
- * LogLevel.debug // 0
- * LogLevel.info // 1
- * LogLevel.warn // 2
- * LogLevel.error // 3
+ * LogLevel.debug // 1
+ * LogLevel.info // 2
+ * LogLevel.warn // 3
+ * LogLevel.error // 4
  */
 export enum LogLevel {
-  debug = 0,
-  info = 1,
-  warn = 2,
-  error = 3,
+  debug = 1,
+  info = 2,
+  warn = 3,
+  error = 4,
 }
 /**
  * Logger class to log messages to the console. The log level can be set to control the verbosity of the logs.
