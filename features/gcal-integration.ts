@@ -4,7 +4,7 @@ import * as process from 'process'
 import { google, Auth, calendar_v3 } from 'googleapis'
 import { authenticate } from '@google-cloud/local-auth'
 import { OAuth2Client } from 'google-auth-library'
-import { Logger } from '../helpers/logger.ts'
+import { Logger, LogLevel } from '../helpers/logger.ts'
 import { config } from 'dotenv'
 import { GaxiosResponse } from 'gaxios'
 import { ScheduleMessage } from '../helpers/scheduleMessageParser.ts'
@@ -23,7 +23,7 @@ config()
  * @example gcalIntegration.createEventFromScheduleMessage(scheduleMessage, 'calendarId')
  */
 export default class GcalIntegration {
-  logger: Logger = new Logger({ functionName: 'GcalIntegration' })
+  private logger: Logger = new Logger({ functionName: 'GcalIntegration', logLevel: LogLevel.debug })
   constructor() {}
 
   // If modifying these scopes, delete token.json.
@@ -135,18 +135,19 @@ export default class GcalIntegration {
   async listEvents(calendarId?: string): Promise<void | calendar_v3.Schema$Event[]> {
     if (!this.client) throw new Error('Error: No client found, please initialize.')
     if (!calendarId) calendarId = 'primary' // default calendar
-    const calendar: calendar_v3.Calendar = google.calendar({ version: 'v3', auth: this.client })
+    const gcal: calendar_v3.Calendar = google.calendar({ version: 'v3', auth: this.client })
 
-    const res: any = await calendar.events.list({
-      calendarId,
-      timeMin: new Date().toISOString(),
-      maxResults: 10,
-      singleEvents: true,
-      orderBy: 'startTime',
-    })
-    const events: calendar_v3.Schema$Event[] | undefined = res.data.items
+    const events: calendar_v3.Schema$Event[] | undefined = (
+      await gcal.events.list({
+        calendarId,
+        timeMin: new Date().toISOString(),
+        maxResults: 10,
+        singleEvents: true,
+        orderBy: 'startTime',
+      })
+    ).data.items
     if (!events || events.length === 0) {
-      this.logger.debug('No upcoming events found.')
+      this.logger.info('No upcoming events found.')
       return
     }
     this.logger.debug('Upcoming 10 events:')
@@ -165,12 +166,11 @@ export default class GcalIntegration {
    */
   async listCalendars(): Promise<void | calendar_v3.Schema$CalendarList> {
     if (!this.client) throw new Error('Error: No client found, please initialize.')
-    const calendar: calendar_v3.Calendar = google.calendar({ version: 'v3', auth: this.client })
+    const gcal: calendar_v3.Calendar = google.calendar({ version: 'v3', auth: this.client })
 
-    const res = await calendar.calendarList.list()
-    const calendars: calendar_v3.Schema$CalendarList | undefined = res.data
+    const calendars: calendar_v3.Schema$CalendarList | undefined = (await gcal.calendarList.list()).data
     if (!calendars || !calendars.items || calendars.items.length === 0) {
-      this.logger.debug('No calendars found.')
+      this.logger.info('No calendars found.')
       return
     }
     this.logger.debug(`Calendars: ${calendars.items.map((calendar) => calendar.summary).join(', ')}`)
@@ -178,8 +178,125 @@ export default class GcalIntegration {
   }
 
   /**
-   *
+   * Sets up one main calendar for the entire schedule, one calendar per region, and one calendar per user.
+   * @returns {Promise<void>}
+   * @example setupCalendars()
    */
+  async setupCalendars(): Promise<void> {
+    if (!this.client) throw new Error('Error: No client found, please initialize.')
+
+    const calendars: void | calendar_v3.Schema$CalendarList = await this.listCalendars()
+    if (calendars && calendars.items && calendars.items.length > 0) {
+      // check if main calendar exists
+      const mainCalendar: calendar_v3.Schema$Calendar | void = calendars.items.find((calendar) => {
+        return calendar.summary === 'Rise Schedule'
+      })
+      if (mainCalendar) {
+        this.logger.info('Main calendar exists.')
+      } else {
+        await this.createMainCalendar()
+      }
+
+      const regions: string[] = ['NA', 'EU']
+      regions.forEach(async (region: string) => {
+        // check if region calendar exists
+        const regionCalendar: calendar_v3.Schema$Calendar | void = calendars.items?.find((calendar) => {
+          return calendar.summary === `Rise Schedule - ${region}`
+        })
+        if (regionCalendar) {
+          this.logger.info(`${region} calendar exists.`)
+        } else {
+          await this.createRegionCalendar(region)
+        }
+      })
+    }
+  }
+
+  /**
+   * Creates a main calendar for the entire schedule.
+   * @returns {Promise<void>}
+   * @example createMainCalendar()
+   */
+  async createMainCalendar() {
+    if (!this.client) throw new Error('Error: No client found, please initialize.')
+    const gcal: calendar_v3.Calendar = google.calendar({ version: 'v3', auth: this.client })
+
+    // Create main calendar
+    const mainCalendar: calendar_v3.Schema$Calendar = {
+      summary: 'Rise Schedule',
+      description: 'Main calendar for the Rise schedule.',
+      timeZone: 'Europe/Amsterdam',
+    }
+    const mainCalendarRes: GaxiosResponse<calendar_v3.Schema$Calendar> | void = await gcal.calendars
+      .insert({
+        requestBody: mainCalendar,
+      })
+      .catch((err: any) => {
+        this.logger.error(err)
+      })
+    if (!mainCalendarRes) this.logger.error('Could not create main calendar.')
+    else this.logger.debug('Main calendar created: %s', mainCalendarRes.data.id)
+  }
+
+  /**
+   * Creates a region calendar for the specified region.
+   * @param region
+   * @returns {Promise<void>}
+   * @example createRegionCalendar('NA')
+   * @example createRegionCalendar('EU')
+   */
+  async createRegionCalendar(region: string) {
+    if (!this.client) throw new Error('Error: No client found, please initialize.')
+    const gcal: calendar_v3.Calendar = google.calendar({ version: 'v3', auth: this.client })
+
+    // Create region calendar
+    const regionCalendar: calendar_v3.Schema$Calendar = {
+      summary: `Rise Schedule - ${region}`,
+      description: `Calendar for the Rise schedule for region ${region}.`,
+      timeZone: 'Europe/Amsterdam',
+    }
+    const regionCalendarRes: GaxiosResponse<calendar_v3.Schema$Calendar> | void = await gcal.calendars
+      .insert({
+        requestBody: regionCalendar,
+      })
+      .catch((err: any) => {
+        this.logger.error(err)
+      })
+    if (!regionCalendarRes) this.logger.error(`Could not create ${region} calendar.`)
+    else this.logger.debug(`${region} calendar created: %s`, regionCalendarRes.data.id)
+  }
+
+  async createUserCalendars(username: string) {
+    if (!this.client) throw new Error('Error: No client found, please initialize.')
+    // Check if user calendar exists
+    const calendars: void | calendar_v3.Schema$CalendarList = await this.listCalendars()
+    if (calendars && calendars.items && calendars.items.length > 0) {
+      const userCalendar: calendar_v3.Schema$Calendar | void = calendars.items.find((calendar) => {
+        return calendar.summary === `Rise Schedule - ${username}`
+      })
+      if (userCalendar) {
+        this.logger.info(`${username} calendar exists.`)
+        return
+      }
+    }
+    const gcal: calendar_v3.Calendar = google.calendar({ version: 'v3', auth: this.client })
+
+    // Create user calendar
+    const userCalendar: calendar_v3.Schema$Calendar = {
+      summary: `Rise Schedule - ${username}`,
+      description: `Calendar for the Rise schedule for user ${username}.`,
+      timeZone: 'Europe/Amsterdam',
+    }
+    const userCalendarRes: GaxiosResponse<calendar_v3.Schema$Calendar> | void = await gcal.calendars
+      .insert({
+        requestBody: userCalendar,
+      })
+      .catch((err: any) => {
+        this.logger.error(err)
+      })
+    if (!userCalendarRes) this.logger.error(`Could not create ${username} calendar.`)
+    else this.logger.debug(`${username} calendar created: %s`, userCalendarRes.data.id)
+  }
 
   /**
    * Creates a new event, based on a ScheduleMessage on the specified calendar.
