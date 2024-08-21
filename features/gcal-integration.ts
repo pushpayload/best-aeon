@@ -34,6 +34,7 @@ export default class GcalIntegration {
   CREDENTIALS_PATH: string = path.join(process.cwd(), 'credentials.json')
 
   client: OAuth2Client | undefined
+  calendarIds: { [key: string]: string } = {}
 
   /**
    * Initializes the Google Calendar integration.
@@ -193,6 +194,11 @@ export default class GcalIntegration {
       })
       if (mainCalendar) {
         this.logger.info('Main calendar exists.')
+        if (mainCalendar && mainCalendar.id) {
+          this.calendarIds['main'] = mainCalendar.id
+        } else {
+          throw new Error('Could not retrieve main calendar ID.')
+        }
       } else {
         await this.createMainCalendar()
       }
@@ -205,11 +211,17 @@ export default class GcalIntegration {
         })
         if (regionCalendar) {
           this.logger.info(`${region} calendar exists.`)
+          if (regionCalendar && regionCalendar.id) {
+            this.calendarIds[region] = regionCalendar.id
+          } else {
+            throw new Error(`Could not retrieve ${region} calendar ID.`)
+          }
         } else {
           await this.createRegionCalendar(region)
         }
       })
     }
+    this.logger.debug('Calendar IDs: ', this.calendarIds)
   }
 
   /**
@@ -235,7 +247,14 @@ export default class GcalIntegration {
         this.logger.error(err)
       })
     if (!mainCalendarRes) this.logger.error('Could not create main calendar.')
-    else this.logger.debug('Main calendar created: %s', mainCalendarRes.data.id)
+    else {
+      this.logger.debug('Main calendar created: %s', mainCalendarRes.data.id)
+      if (mainCalendarRes.data && mainCalendarRes.data.id) {
+        this.calendarIds['main'] = mainCalendarRes.data.id
+      } else {
+        throw new Error('Could not retrieve main calendar ID.')
+      }
+    }
   }
 
   /**
@@ -263,10 +282,23 @@ export default class GcalIntegration {
         this.logger.error(err)
       })
     if (!regionCalendarRes) this.logger.error(`Could not create ${region} calendar.`)
-    else this.logger.debug(`${region} calendar created: %s`, regionCalendarRes.data.id)
+    else {
+      this.logger.debug(`${region} calendar created: %s`, regionCalendarRes.data.id)
+      if (regionCalendarRes.data && regionCalendarRes.data.id) {
+        this.calendarIds[region] = regionCalendarRes.data.id
+      } else {
+        throw new Error(`Could not retrieve ${region} calendar ID.`)
+      }
+    }
   }
 
-  async createUserCalendars(username: string) {
+  /**
+   * Creates a calendar for the specified user.
+   * @param {string} username - The username to create the calendar for.
+   * @returns {Promise<void>}
+   * @example createUserCalendar('username')
+   */
+  async createUserCalendar(username: string) {
     if (!this.client) throw new Error('Error: No client found, please initialize.')
     // Check if user calendar exists
     const calendars: void | calendar_v3.Schema$CalendarList = await this.listCalendars()
