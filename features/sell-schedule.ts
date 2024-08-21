@@ -10,10 +10,12 @@ import {
 import { CalendarEvent, google, ics } from 'calendar-link'
 import sellChannels from '../constants/sellChannels.ts'
 import Queue from 'queue'
+import { Logger, LogLevel } from '../helpers/logger.ts'
 
 const MCMysticCoinEmoji: string = '545057156274323486'
 const GCalEmoji: string = '1274033711607844905'
 const discordTimeStampRegex: RegExp = /(?<before>.*)<t:(?<timestamp>\d+):[dDtTfFR]>(?<after>.*)/gm
+const logger: Logger = new Logger({ functionName: 'sell-schedule', logLevel: LogLevel.info })
 
 export default function (client: Client, scheduleChannelIds: [{ id: string; regions: string[] }]) {
   const q = new Queue({ autostart: true, concurrency: 1 })
@@ -41,7 +43,7 @@ export default function (client: Client, scheduleChannelIds: [{ id: string; regi
       }
 
       for (const sellChannelId in sellChannels) {
-        console.log(`sellChannelId: ${sellChannelId}, region: ${sellChannels[sellChannelId].region}`)
+        logger.debug(`sellChannelId: ${sellChannelId}, region: ${sellChannels[sellChannelId].region}`)
         const sellChannel = await client.channels.fetch(sellChannelId)
 
         if (sellChannel && sellChannel instanceof TextChannel) {
@@ -57,7 +59,7 @@ export default function (client: Client, scheduleChannelIds: [{ id: string; regi
         }
       }
 
-      console.log('loaded schedule', schedule.length)
+      logger.log('loaded schedule', schedule.length)
 
       const endListener = () => {
         isStarting = false
@@ -69,16 +71,16 @@ export default function (client: Client, scheduleChannelIds: [{ id: string; regi
 
       q.push(createMessages)
     } catch (e: any) {
-      console.error('---- AN ERROR WAS THROWN ----')
-      console.error('message', e.rawError?.message)
-      console.error('content', e.requestBody?.json?.content)
-      console.error('---- END ERROR ----')
+      logger.error('---- AN ERROR WAS THROWN ----')
+      logger.error('message', e.rawError?.message)
+      logger.error('content', e.requestBody?.json?.content)
+      logger.error('---- END ERROR ----')
 
       if (e.rawError?.message === 'Missing Permissions' || e.rawError?.message === 'Missing Access') {
         return
       }
 
-      console.error(e)
+      logger.error(e)
     }
   })
 
@@ -100,7 +102,7 @@ export default function (client: Client, scheduleChannelIds: [{ id: string; regi
         return
       }
 
-      console.error(e)
+      logger.error(e)
     }
   })
 
@@ -188,7 +190,7 @@ export default function (client: Client, scheduleChannelIds: [{ id: string; regi
           return message.reactorIds.includes(interaction.user.id) && regions.includes(message.region)
         })
 
-        console.log(`Found ${result.length} items for user ${interaction.user.id}, result: ${JSON.stringify(result)}`)
+        logger.debug(`Found ${result.length} items for user ${interaction.user.id}, result: ${JSON.stringify(result)}`)
 
         if (!result.length) {
           await interaction.editReply({
@@ -201,8 +203,8 @@ export default function (client: Client, scheduleChannelIds: [{ id: string; regi
         }
       }
     } catch (e: any) {
-      console.error(e.rawError?.message || 'Something went wrong?')
-      console.error(e)
+      logger.error(e.rawError?.message || 'Something went wrong?')
+      logger.error(e)
 
       try {
         interaction.editReply({
@@ -210,7 +212,7 @@ export default function (client: Client, scheduleChannelIds: [{ id: string; regi
         })
         return
       } catch {
-        console.error('--- ERROR: Was not allowed to reply to interaction ---')
+        logger.error('--- ERROR: Was not allowed to reply to interaction ---')
       }
     }
   })
@@ -293,12 +295,12 @@ export default function (client: Client, scheduleChannelIds: [{ id: string; regi
     scheduleMessage.calendarEvent = createCalendarEventFromMessage(scheduleMessage)
 
     if (process.env.DEV === 'true') {
-      console.log('Adding to schedule: ', message.content)
-      console.log('Matches: ', JSON.stringify(matches))
-      console.log('Groups: ', JSON.stringify(groups))
-      console.log('Time text: ', timeText)
-      console.log('Timestamp: ', timestamp)
-      console.log('ScheduleMessage: ', scheduleMessage)
+      logger.debug('Adding to schedule: ', message.content)
+      logger.debug('Matches: ', JSON.stringify(matches))
+      logger.debug('Groups: ', JSON.stringify(groups))
+      logger.debug('Time text: ', timeText)
+      logger.debug('Timestamp: ', timestamp)
+      logger.debug('ScheduleMessage: ', scheduleMessage)
     }
 
     return scheduleMessage
@@ -333,7 +335,7 @@ export default function (client: Client, scheduleChannelIds: [{ id: string; regi
         const channel = client.channels.cache.get(channelInfo.id) as TextChannel | undefined
 
         if (!channel) {
-          console.error(`--- ERROR: Channel not found to post sell-schedule ${channelInfo.regions.join('-')} ---`)
+          logger.error(`--- ERROR: Channel not found to post sell-schedule ${channelInfo.regions.join('-')} ---`)
           continue
         }
 
