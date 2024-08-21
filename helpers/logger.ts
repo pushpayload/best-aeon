@@ -1,3 +1,6 @@
+import { config } from 'dotenv'
+config()
+
 /**
  * Enum to represent the log levels.
  * @enum {number}
@@ -21,7 +24,7 @@ export enum LogLevel {
  * @class Logger
  * @constructor
  * @param {Object} [options] - Options for the logger.
- * @param {LogLevel} [options.logLevel=LogLevel.info] - The log level to use.
+ * @param {LogLevel} [options.logLevel=LogLevel.info] - The log level to use. Defaults to LogLevel.info.
  * @param {string} [options.functionName] - The name of the function to include in the log messages.
  * @example
  * const logger = new Logger(LogLevel.debug)
@@ -48,6 +51,18 @@ export class Logger {
 
   setLogLevel(level: LogLevel): void {
     this.logLevel = level
+  }
+
+  getLogLevel(): LogLevel {
+    return this.logLevel
+  }
+
+  setFunctionName(name: string): void {
+    this.functionName = name
+  }
+
+  getFunctionName(): string | undefined {
+    return this.functionName
   }
 
   log(...args: any[]): void {

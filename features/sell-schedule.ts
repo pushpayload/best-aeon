@@ -11,11 +11,13 @@ import { CalendarEvent, google, ics } from 'calendar-link'
 import sellChannels from '../constants/sellChannels.ts'
 import Queue from 'queue'
 import { Logger, LogLevel } from '../helpers/logger.ts'
+import { ScheduleMessageParser } from '../helpers/scheduleMessageParser.ts'
 
 const MCMysticCoinEmoji: string = '545057156274323486'
 const GCalEmoji: string = '1274033711607844905'
 const discordTimeStampRegex: RegExp = /(?<before>.*)<t:(?<timestamp>\d+):[dDtTfFR]>(?<after>.*)/gm
-const logger: Logger = new Logger({ functionName: 'sell-schedule', logLevel: LogLevel.info })
+const logger: Logger = new Logger({ functionName: 'sell-schedule' })
+const scheduleMessageParser: ScheduleMessageParser = new ScheduleMessageParser()
 
 export default function (client: Client, scheduleChannelIds: [{ id: string; regions: string[] }]) {
   const q = new Queue({ autostart: true, concurrency: 1 })
@@ -140,7 +142,7 @@ export default function (client: Client, scheduleChannelIds: [{ id: string; regi
         updatedMessage = await updatedMessage.fetch()
       }
 
-      const parsedMessage: ScheduleMessage = await parseScheduleMessage(updatedMessage)
+      const parsedMessage: ScheduleMessage = await scheduleMessageParser.parseScheduleMessage(updatedMessage, client)
 
       schedule[messageIndex].date = parsedMessage.date
       schedule[messageIndex].text = parsedMessage.text
@@ -253,57 +255,8 @@ export default function (client: Client, scheduleChannelIds: [{ id: string; regi
   }
 
   async function addToSchedule(message: Message<boolean>) {
-    const scheduleMessage: ScheduleMessage = await parseScheduleMessage(message)
+    const scheduleMessage: ScheduleMessage = await scheduleMessageParser.parseScheduleMessage(message, client)
     schedule.push(scheduleMessage)
-  }
-
-  async function parseScheduleMessage(message: Message<boolean>): Promise<ScheduleMessage> {
-    const regex = /(?<before>.*)<t:(?<timestamp>\d+):[dDtTfFR]>(?<after>.*)/gm
-    const matches = regex.exec(message.content)
-    const groups = matches?.groups
-    const timestamp: number = parseInt(matches?.groups?.timestamp ?? '0')
-    const timeText: string =
-      (matches?.groups?.before?.toString().trim() ?? '') + ' ' + (matches?.groups?.after?.toString().trim() ?? '')
-
-    let userIds: string[] = []
-
-    let messageReaction = message.reactions.cache.get(MCMysticCoinEmoji)
-
-    if (messageReaction) {
-      if (messageReaction.partial) {
-        messageReaction = await messageReaction.fetch()
-      }
-
-      const users = await messageReaction.users.fetch()
-      userIds = users.map((_, id) => {
-        return id
-      })
-    }
-
-    const scheduleMessage: ScheduleMessage = {
-      id: message.id,
-      channelId: message.channelId,
-      reactorIds: userIds,
-      reactorNames: userIds.map((id) => {
-        return client.users.cache.get(id)?.username ?? 'Unknown'
-      }),
-      region: sellChannels[message.channelId].region,
-      date: timestamp,
-      text: timeText.replaceAll('@everyone', '').replaceAll('@', '').replaceAll('  ', ' ').trim(),
-      url: message.url,
-    }
-    scheduleMessage.calendarEvent = createCalendarEventFromMessage(scheduleMessage)
-
-    if (process.env.DEV === 'true') {
-      logger.debug('Adding to schedule: ', message.content)
-      logger.debug('Matches: ', JSON.stringify(matches))
-      logger.debug('Groups: ', JSON.stringify(groups))
-      logger.debug('Time text: ', timeText)
-      logger.debug('Timestamp: ', timestamp)
-      logger.debug('ScheduleMessage: ', scheduleMessage)
-    }
-
-    return scheduleMessage
   }
 
   async function createMessages() {
@@ -435,21 +388,6 @@ function getPrunedOutput(history: ScheduleMessage[], addSubtext = false, include
   )
 
   return result.output
-}
-
-function createCalendarEventFromMessage(message: ScheduleMessage): CalendarEvent {
-  const date = new Date(message.date * 1000)
-  const duration = 30
-
-  return {
-    title: message.text,
-    // description: `<h3><a href="${message.url}">${message.text}</a></h3>\n<b>Signups:</b> ${message.reactorNames.join(', ')}\n\n<b>Region:</b> ${message.region}\n\n<i>Calendar event generated at ${new Date().toTimeString()}</i>`,
-    start: date,
-    duration: [duration, 'minutes'],
-    location: message.region,
-    // url: message.url,
-    // guests: message.reactorNames,
-  }
 }
 
 type ScheduleMessage = {
