@@ -332,6 +332,7 @@ export default class GcalIntegration {
 
   /**
    * Creates a new event, based on a ScheduleMessage on the specified calendar.
+   * If the event already exists, it will be updated.
    * @param {ScheduleMessage} scheduleMessage - The schedule message to create the event from.
    * @param {string=} [calendarId='primary'] - The calendar ID to create the event on.
    * @returns {Promise<void | GaxiosResponse<calendar_v3.Schema$Event>>}
@@ -353,6 +354,43 @@ export default class GcalIntegration {
 
     // Get a calendar instance
     const calendar: calendar_v3.Calendar = google.calendar({ version: 'v3', auth: this.client })
+
+    // Check if the event already exists
+    const event: void | calendar_v3.Schema$Event[] = (
+      await calendar.events.list({
+        calendarId,
+        q: scheduleMessage.id,
+      })
+    ).data.items
+    if (event && event.length > 0) {
+      this.logger.info('Event already exists.')
+      // Update the event
+      const resource: calendar_v3.Schema$Event = {
+        id: scheduleMessage.id,
+        summary: scheduleMessage.calendarEvent.title,
+        location: scheduleMessage.calendarEvent.location,
+        description: scheduleMessage.calendarEvent.description,
+        start: {
+          dateTime: scheduleMessage.calendarEvent.start.toISOString(),
+          timeZone: scheduleMessage.calendarEvent.start.format('Z'),
+        },
+        end: {
+          dateTime: scheduleMessage.calendarEvent.end.toISOString(),
+          timeZone: scheduleMessage.calendarEvent.end.format('Z'),
+        },
+      }
+      const updatedEvent: void | GaxiosResponse<calendar_v3.Schema$Event> = await calendar.events
+        .update({
+          calendarId,
+          eventId: scheduleMessage.id,
+          requestBody: resource,
+        })
+        .catch((err: any) => {
+          this.logger.error(err)
+        })
+      this.logger.debug('Event updated: %s', updatedEvent?.data?.htmlLink)
+      return updatedEvent
+    }
 
     // Create a new event resource
     const resource: calendar_v3.Schema$Event = {
@@ -381,5 +419,23 @@ export default class GcalIntegration {
       })
     this.logger.debug('Event created: %s', insertedEvent?.data?.htmlLink)
     return insertedEvent
+  }
+
+  async deleteEvent(eventId: string, calendarId?: string): Promise<void> {
+    if (!calendarId) calendarId = 'primary' // default calendar
+
+    // Get a calendar instance
+    const calendar: calendar_v3.Calendar = google.calendar({ version: 'v3', auth: this.client })
+
+    // Delete the event
+    await calendar.events
+      .delete({
+        calendarId,
+        eventId,
+      })
+      .catch((err: any) => {
+        this.logger.error(err)
+      })
+    this.logger.debug('Event deleted: %s', eventId)
   }
 }
