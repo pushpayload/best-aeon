@@ -8,11 +8,13 @@
   "type": "module",
   "exports": "./bot.js",
   "dependencies": {
+    "@google-cloud/local-auth": "^3.0.1",
     "@google/generative-ai": "^0.15.0",
     "calendar-link": "^2.7.0",
     "discord.js": "^14.15.3",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "googleapis": "^142.0.0",
     "queue": "^7.0.0"
   },
   "devDependencies": {

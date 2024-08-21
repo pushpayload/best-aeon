@@ -1,5 +1,6 @@
 import { config } from 'dotenv'
 import { Client, Events, GatewayIntentBits, Partials } from 'discord.js'
+import { Logger } from './helpers/logger.ts'
 
 import SetupSellSchedule from './features/sell-schedule.ts'
 import * as SetupBuyerManagement from './features/buyer-management.ts'
@@ -17,6 +18,8 @@ import AddToThread from './onMessageReactionAddHooks/0.addToThread.js'
 
 import YoinkSellSpot from './onInteractionHooks/yoink-sell-spot.ts'
 
+import GcalIntegration from './features/gcal-integration.ts'
+
 config()
 
 const TOKEN = process.env.TOKEN
@@ -32,12 +35,20 @@ const client = new Client({
   partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 })
 
+const logger = new Logger({ functionName: 'bot.js' })
+const gcal = new GcalIntegration()
+
 let maxCounter = {
   value: 1,
 }
 
-client.once('ready', () => {
-  console.log(`Logged in as ${client.user?.tag}`)
+client.once('ready', async () => {
+  logger.info(`Logged in as ${client.user?.tag}`)
+
+  // Load google calendar integration
+  await gcal.initialize().catch((e) => logger.error(`Error while trying to initialize gcal: ${e}`))
+  await gcal.listEvents().catch((e) => logger.error(`Error while trying to list events: ${e}`))
+  await gcal.listCalendars().catch((e) => logger.error(`Error while trying to list calendars: ${e}`))
 })
 
 SetupSellSchedule(client, [
