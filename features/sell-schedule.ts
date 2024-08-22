@@ -121,6 +121,8 @@ export default function (
 
     schedule.splice(index, 1)
 
+    gcal.deleteEvent(message.id)
+
     await createMessages()
   })
 
@@ -133,6 +135,8 @@ export default function (
       }
 
       schedule.splice(index, 1)
+
+      gcal.deleteEvent(message.id)
     })
 
     await createMessages()

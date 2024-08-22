@@ -6,7 +6,7 @@ import { authenticate } from '@google-cloud/local-auth'
 import { OAuth2Client } from 'google-auth-library'
 import { Logger, LogLevel } from '../helpers/logger.ts'
 import { config } from 'dotenv'
-import { GaxiosResponse } from 'gaxios'
+import { GaxiosResponse, GaxiosError } from 'gaxios'
 import { ScheduleMessage } from '../helpers/scheduleMessageParser.ts'
 
 config()
@@ -359,11 +359,11 @@ export default class GcalIntegration {
     const event: void | calendar_v3.Schema$Event[] = (
       await calendar.events.list({
         calendarId,
-        q: scheduleMessage.id,
       })
     ).data.items
-    if (event && event.length > 0) {
-      this.logger.info('Event already exists.')
+
+    if (event && event.length > 0 && event.find((e) => e.id === scheduleMessage.id)) {
+      this.logger.info(`Event ${scheduleMessage.calendarEvent.title}  with id: ${scheduleMessage.id} already exists.`)
       // Update the event
       const resource: calendar_v3.Schema$Event = {
         id: scheduleMessage.id,
@@ -371,12 +371,12 @@ export default class GcalIntegration {
         location: scheduleMessage.calendarEvent.location,
         description: scheduleMessage.calendarEvent.description,
         start: {
-          dateTime: scheduleMessage.calendarEvent.start.toISOString(),
-          timeZone: scheduleMessage.calendarEvent.start.format('Z'),
+          dateTime: new Date(scheduleMessage.calendarEvent.start).toISOString(),
+          timeZone: 'Europe/Amsterdam',
         },
         end: {
-          dateTime: scheduleMessage.calendarEvent.end.toISOString(),
-          timeZone: scheduleMessage.calendarEvent.end.format('Z'),
+          dateTime: new Date(scheduleMessage.calendarEvent.end).toISOString(),
+          timeZone: 'Europe/Amsterdam',
         },
       }
       const updatedEvent: void | GaxiosResponse<calendar_v3.Schema$Event> = await calendar.events
@@ -388,7 +388,7 @@ export default class GcalIntegration {
         .catch((err: any) => {
           this.logger.error(err)
         })
-      this.logger.debug('Event updated: %s', updatedEvent?.data?.htmlLink)
+      this.logger.debug(`Event ${updatedEvent?.data?.summary} updated: ${updatedEvent?.data?.htmlLink}`)
       return updatedEvent
     }
 
@@ -399,12 +399,12 @@ export default class GcalIntegration {
       location: scheduleMessage.calendarEvent.location,
       description: scheduleMessage.calendarEvent.description,
       start: {
-        dateTime: scheduleMessage.calendarEvent.start.toISOString(),
-        timeZone: scheduleMessage.calendarEvent.start.format('Z'),
+        dateTime: new Date(scheduleMessage.calendarEvent.start).toISOString(),
+        timeZone: 'Europe/Amsterdam',
       },
       end: {
-        dateTime: scheduleMessage.calendarEvent.end.toISOString(),
-        timeZone: scheduleMessage.calendarEvent.end.format('Z'),
+        dateTime: new Date(scheduleMessage.calendarEvent.end).toISOString(),
+        timeZone: 'Europe/Amsterdam',
       },
     }
 
@@ -417,12 +417,28 @@ export default class GcalIntegration {
       .catch((err: any) => {
         this.logger.error(err)
       })
-    this.logger.debug('Event created: %s', insertedEvent?.data?.htmlLink)
+    this.logger.debug(`Event ${insertedEvent?.data?.summary} created: ${insertedEvent?.data?.htmlLink}`)
     return insertedEvent
   }
 
   async deleteEvent(eventId: string, calendarId?: string): Promise<void> {
-    if (!calendarId) calendarId = 'primary' // default calendar
+    if (!calendarId) {
+      // remove event from all calendars
+      const calendarList = await this.listCalendars()
+      if (calendarList && calendarList.items) {
+        calendarList.items.forEach(async (event) => {
+          if (event.id) {
+            await this.deleteEvent(eventId, event.id).catch((err) => {
+              if (err instanceof GaxiosError && err.status === 404) {
+                // Just ignore 404 errors because we loop over all calendars
+                // without checking if the event exists in the calendar
+              } else this.logger.error(err)
+            })
+          }
+        })
+      }
+      return
+    }
 
     // Get a calendar instance
     const calendar: calendar_v3.Calendar = google.calendar({ version: 'v3', auth: this.client })
@@ -436,6 +452,6 @@ export default class GcalIntegration {
       .catch((err: any) => {
         this.logger.error(err)
       })
-    this.logger.debug('Event deleted: %s', eventId)
+    this.logger.debug(`Event ${eventId} deleted.`)
   }
 }
