@@ -54,20 +54,24 @@ client.once('ready', async () => {
   }
 })
 
-SetupSellSchedule(client, [
-  {
-    id: process.env.SELL_CHANNEL_BOTH,
-    regions: ['NA', 'EU'],
-  },
-  {
-    id: process.env.SELL_CHANNEL_EU,
-    regions: ['EU'],
-  },
-  {
-    id: process.env.SELL_CHANNEL_NA,
-    regions: ['NA'],
-  },
-])
+SetupSellSchedule(
+  client,
+  [
+    {
+      id: process.env.SELL_CHANNEL_BOTH,
+      regions: ['NA', 'EU'],
+    },
+    {
+      id: process.env.SELL_CHANNEL_EU,
+      regions: ['EU'],
+    },
+    {
+      id: process.env.SELL_CHANNEL_NA,
+      regions: ['NA'],
+    },
+  ],
+  gcal,
+)
 
 SetupBuyerManagement.default()
 

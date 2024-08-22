@@ -12,14 +12,18 @@ import sellChannels from '../constants/sellChannels.ts'
 import Queue from 'queue'
 import { Logger, LogLevel } from '../helpers/logger.ts'
 import { ScheduleMessageParser } from '../helpers/scheduleMessageParser.ts'
+import { MCMysticCoinEmoji, GCalEmoji } from '../constants/emojis.ts'
+import GcalIntegration from './gcal-integration.ts'
 
-const MCMysticCoinEmoji: string = '545057156274323486'
-const GCalEmoji: string = '1274033711607844905'
 const discordTimeStampRegex: RegExp = /(?<before>.*)<t:(?<timestamp>\d+):[dDtTfFR]>(?<after>.*)/gm
 const logger: Logger = new Logger({ functionName: 'sell-schedule' })
 const scheduleMessageParser: ScheduleMessageParser = new ScheduleMessageParser()
 
-export default function (client: Client, scheduleChannelIds: [{ id: string; regions: string[] }]) {
+export default function (
+  client: Client,
+  scheduleChannelIds: [{ id: string; regions: string[] }],
+  gcal: GcalIntegration,
+) {
   const q = new Queue({ autostart: true, concurrency: 1 })
   const schedule: ScheduleMessage[] = []
   let writtenSchedule: string[] = []
@@ -135,32 +139,16 @@ export default function (client: Client, scheduleChannelIds: [{ id: string; regi
   })
 
   client.on('messageUpdate', async (_, updatedMessage) => {
-    const messageIndex = schedule.findIndex((message) => message.id === updatedMessage.id)
-
-    if (messageIndex !== -1) {
+    // If something was updated and now matches, add it
+    if (sellChannels[updatedMessage.channelId]) {
       if (updatedMessage.partial) {
         updatedMessage = await updatedMessage.fetch()
       }
 
-      const parsedMessage: ScheduleMessage = await scheduleMessageParser.parseScheduleMessage(updatedMessage, client)
+      if (isSellMessage(updatedMessage)) {
+        await addToSchedule(updatedMessage)
 
-      schedule[messageIndex].date = parsedMessage.date
-      schedule[messageIndex].text = parsedMessage.text
-
-      // TODO: Only update the channels that are relevant.
-      await createMessages()
-    } else {
-      // If something was updated and now matches, add it
-      if (sellChannels[updatedMessage.channelId]) {
-        if (updatedMessage.partial) {
-          updatedMessage = await updatedMessage.fetch()
-        }
-
-        if (isSellMessage(updatedMessage)) {
-          await addToSchedule(updatedMessage)
-
-          await createMessages()
-        }
+        await createMessages()
       }
     }
   })
@@ -255,7 +243,23 @@ export default function (client: Client, scheduleChannelIds: [{ id: string; regi
   }
 
   async function addToSchedule(message: Message<boolean>) {
+    // Parse the message
     const scheduleMessage: ScheduleMessage = await scheduleMessageParser.parseScheduleMessage(message, client)
+
+    // Create/update the calendar event
+    await gcal.createEventFromScheduleMessage(scheduleMessage, gcal.calendarIds['main'])
+    await gcal.createEventFromScheduleMessage(scheduleMessage, gcal.calendarIds[scheduleMessage.region])
+
+    // Check if the message is already in the schedule
+    const messageIndex = schedule.findIndex((oldmessage) => oldmessage.id === message.id)
+
+    // If it is, update the date and text
+    if (messageIndex !== -1) {
+      schedule[messageIndex].date = scheduleMessage.date
+      schedule[messageIndex].text = scheduleMessage.text
+      return
+    }
+    // If it isn't, add it to the schedule
     schedule.push(scheduleMessage)
   }
 
