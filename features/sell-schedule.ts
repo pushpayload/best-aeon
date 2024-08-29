@@ -14,8 +14,9 @@ import { Logger, LogLevel } from '../helpers/logger.ts'
 import { ScheduleMessageParser } from '../helpers/scheduleMessageParser.ts'
 import { MCMysticCoinEmoji, GCalEmoji } from '../constants/emojis.ts'
 import GcalIntegration from './gcal-integration.ts'
+import { DiscordTimeStampRegex } from '../constants/discordTimeStampRegex.ts'
+import StartSellThread from '../onMessageCreateHooks/1.startSellThread.ts'
 
-const discordTimeStampRegex: RegExp = /(?<before>.*)<t:(?<timestamp>\d+):[dDtTfFR]>(?<after>.*)/gm
 const logger: Logger = new Logger({ functionName: 'sell-schedule' })
 const scheduleMessageParser: ScheduleMessageParser = new ScheduleMessageParser()
 
@@ -59,7 +60,16 @@ export default function (
 
           if (sellMessages) {
             for (const sellMessage of sellMessages.values()) {
-              await addToSchedule(sellMessage)
+              if (sellMessage.partial) {
+                await sellMessage.fetch()
+              }
+              if (!sellMessage.hasThread) {
+                StartSellThread(sellMessage.content, sellMessage)
+              }
+              if (gcal.CLIENT)
+                await addToSchedule(sellMessage).catch((e) =>
+                  logger.error(`Error while trying to add to schedule: ${e}`),
+                )
             }
           }
         }
@@ -120,8 +130,7 @@ export default function (
     }
 
     schedule.splice(index, 1)
-
-    gcal.deleteEvent(message.id)
+    if (gcal.CLIENT) gcal.deleteEvent(message.id).catch((e) => logger.error(`Error while trying to delete event: ${e}`))
 
     await createMessages()
   })
@@ -135,8 +144,8 @@ export default function (
       }
 
       schedule.splice(index, 1)
-
-      gcal.deleteEvent(message.id)
+      if (gcal.CLIENT)
+        gcal.deleteEvent(message.id).catch((e) => logger.error(`Error while trying to delete event: ${e}`))
     })
 
     await createMessages()
@@ -235,24 +244,21 @@ export default function (
     }
   })
 
-  function isSellMessage(message: Message<boolean>): boolean {
-    const match = message.content.match(discordTimeStampRegex)
-    if (!match) {
-      return false
-    }
-    if (match.groups?.before === '' && match.groups?.after === '') {
-      return false
-    }
-    return true
-  }
-
   async function addToSchedule(message: Message<boolean>) {
     // Parse the message
     const scheduleMessage: ScheduleMessage = await scheduleMessageParser.parseScheduleMessage(message, client)
 
     // Create/update the calendar event
-    await gcal.createEventFromScheduleMessage(scheduleMessage, gcal.calendarIds['main'])
-    await gcal.createEventFromScheduleMessage(scheduleMessage, gcal.calendarIds[scheduleMessage.region])
+    if (gcal.CLIENT) {
+      await gcal.createEventFromScheduleMessage(scheduleMessage, gcal.calendarIds['main']).catch((e) => {
+        logger.error(`Error while trying to create event: ${e}`)
+      })
+      await gcal
+        .createEventFromScheduleMessage(scheduleMessage, gcal.calendarIds[scheduleMessage.region])
+        .catch((e) => {
+          logger.error(`Error while trying to create event: ${e}`)
+        })
+    }
 
     // Check if the message is already in the schedule
     const messageIndex = schedule.findIndex((oldmessage) => oldmessage.id === message.id)
@@ -341,6 +347,17 @@ export default function (
 
     q.push(queueFunction)
   }
+}
+
+export function isSellMessage(message: Message<boolean>): boolean {
+  const match = new RegExp(DiscordTimeStampRegex).exec(message.content)
+  if (!match) {
+    return false
+  }
+  if (match.groups?.before === '' && match.groups?.after === '') {
+    return false
+  }
+  return true
 }
 
 function getPrunedOutput(history: ScheduleMessage[], addSubtext = false, includeCalendarLink = false): string[][] {

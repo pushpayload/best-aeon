@@ -47,7 +47,7 @@ client.once('ready', async () => {
 
   // Load google calendar integration
   await gcal.initialize().catch((e) => logger.error(`Error while trying to initialize gcal: ${e}`))
-  if (gcal.client) {
+  if (gcal.CLIENT) {
     await gcal.listEvents().catch((e) => logger.error(`Error while trying to list events: ${e}`))
     await gcal.listCalendars().catch((e) => logger.error(`Error while trying to list calendars: ${e}`))
     await gcal.setupCalendars().catch((e) => logger.error(`Error while trying to setup calendars: ${e}`))

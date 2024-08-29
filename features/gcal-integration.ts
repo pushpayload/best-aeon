@@ -33,7 +33,7 @@ export default class GcalIntegration {
   TOKEN_PATH: string = path.join(process.cwd(), 'token.json')
   CREDENTIALS_PATH: string = path.join(process.cwd(), 'credentials.json')
 
-  client: OAuth2Client | undefined
+  CLIENT: OAuth2Client | undefined
   calendarIds: { [key: string]: string } = {}
 
   /**
@@ -67,7 +67,11 @@ export default class GcalIntegration {
     if (!authClient) {
       throw new Error('Could not authorize client.')
     }
-    this.client = authClient
+
+    // save client
+    this.saveCredentials(authClient)
+
+    this.CLIENT = authClient
     return
   }
 
@@ -81,8 +85,32 @@ export default class GcalIntegration {
       const content: string = await fs.promises.readFile(this.TOKEN_PATH, 'utf-8')
       const credentials: any = JSON.parse(content)
       const auth = google.auth.fromJSON(credentials)
+
+      // Check if the token is expired
+      this.logger.info(`Token expiry date: ${new Date(credentials.expiry_date).toISOString()}`)
+      if (credentials.expiry_date && credentials.expiry_date < new Date().getTime()) {
+        this.logger.info('Token expired. Trying to refresh token.')
+      }
+
+      // Perform a test call to see if the token is still valid
+      const at = await auth.getAccessToken().catch((err) => {
+        if (err instanceof GaxiosError && err.response?.data?.error === 'invalid_grant') {
+          this.logger.error('Invalid grant error. Token expired.')
+          return
+        }
+        this.logger.error(err)
+        return
+      })
+      this.logger.debug(`Access token: ${JSON.stringify(at)}`)
+      if (!at) {
+        // Token expired return undefined
+        this.logger.error('Token expired.')
+        return
+      }
+
       return auth as OAuth2Client
     } catch (err) {
+      this.logger.error(err)
       return
     }
   }
@@ -102,6 +130,7 @@ export default class GcalIntegration {
       client_id: key.client_id,
       client_secret: key.client_secret,
       refresh_token: client.credentials.refresh_token,
+      expiry_date: client.credentials.expiry_date,
     })
     await fs.promises.writeFile(this.TOKEN_PATH, payload)
   }
@@ -111,7 +140,9 @@ export default class GcalIntegration {
    *
    */
   async authorize(): Promise<OAuth2Client> {
-    let client: OAuth2Client | void = await this.loadSavedCredentialsIfExist()
+    let client: OAuth2Client | void = await this.loadSavedCredentialsIfExist().catch((err) => {
+      this.logger.error(err)
+    })
     if (client) {
       return client
     }
@@ -134,9 +165,9 @@ export default class GcalIntegration {
    * @example listEvents()
    */
   async listEvents(calendarId?: string): Promise<void | calendar_v3.Schema$Event[]> {
-    if (!this.client) throw new Error('Error: No client found, please initialize.')
+    if (!this.CLIENT) throw new Error('Error: No client found, please initialize.')
     if (!calendarId) calendarId = 'primary' // default calendar
-    const gcal: calendar_v3.Calendar = google.calendar({ version: 'v3', auth: this.client })
+    const gcal: calendar_v3.Calendar = google.calendar({ version: 'v3', auth: this.CLIENT })
 
     const events: calendar_v3.Schema$Event[] | undefined = (
       await gcal.events.list({
@@ -166,8 +197,8 @@ export default class GcalIntegration {
    * @example listCalendars()
    */
   async listCalendars(): Promise<void | calendar_v3.Schema$CalendarList> {
-    if (!this.client) throw new Error('Error: No client found, please initialize.')
-    const gcal: calendar_v3.Calendar = google.calendar({ version: 'v3', auth: this.client })
+    if (!this.CLIENT) throw new Error('Error: No client found, please initialize.')
+    const gcal: calendar_v3.Calendar = google.calendar({ version: 'v3', auth: this.CLIENT })
 
     const calendars: calendar_v3.Schema$CalendarList | undefined = (await gcal.calendarList.list()).data
     if (!calendars || !calendars.items || calendars.items.length === 0) {
@@ -184,7 +215,7 @@ export default class GcalIntegration {
    * @example setupCalendars()
    */
   async setupCalendars(): Promise<void> {
-    if (!this.client) throw new Error('Error: No client found, please initialize.')
+    if (!this.CLIENT) throw new Error('Error: No client found, please initialize.')
 
     const calendars: void | calendar_v3.Schema$CalendarList = await this.listCalendars()
     if (calendars && calendars.items && calendars.items.length > 0) {
@@ -230,8 +261,8 @@ export default class GcalIntegration {
    * @example createMainCalendar()
    */
   async createMainCalendar() {
-    if (!this.client) throw new Error('Error: No client found, please initialize.')
-    const gcal: calendar_v3.Calendar = google.calendar({ version: 'v3', auth: this.client })
+    if (!this.CLIENT) throw new Error('Error: No client found, please initialize.')
+    const gcal: calendar_v3.Calendar = google.calendar({ version: 'v3', auth: this.CLIENT })
 
     // Create main calendar
     const mainCalendar: calendar_v3.Schema$Calendar = {
@@ -265,8 +296,8 @@ export default class GcalIntegration {
    * @example createRegionCalendar('EU')
    */
   async createRegionCalendar(region: string) {
-    if (!this.client) throw new Error('Error: No client found, please initialize.')
-    const gcal: calendar_v3.Calendar = google.calendar({ version: 'v3', auth: this.client })
+    if (!this.CLIENT) throw new Error('Error: No client found, please initialize.')
+    const gcal: calendar_v3.Calendar = google.calendar({ version: 'v3', auth: this.CLIENT })
 
     // Create region calendar
     const regionCalendar: calendar_v3.Schema$Calendar = {
@@ -299,7 +330,7 @@ export default class GcalIntegration {
    * @example createUserCalendar('username')
    */
   async createUserCalendar(username: string) {
-    if (!this.client) throw new Error('Error: No client found, please initialize.')
+    if (!this.CLIENT) throw new Error('Error: No client found, please initialize.')
     // Check if user calendar exists
     const calendars: void | calendar_v3.Schema$CalendarList = await this.listCalendars()
     if (calendars && calendars.items && calendars.items.length > 0) {
@@ -311,7 +342,7 @@ export default class GcalIntegration {
         return
       }
     }
-    const gcal: calendar_v3.Calendar = google.calendar({ version: 'v3', auth: this.client })
+    const gcal: calendar_v3.Calendar = google.calendar({ version: 'v3', auth: this.CLIENT })
 
     // Create user calendar
     const userCalendar: calendar_v3.Schema$Calendar = {
@@ -353,11 +384,11 @@ export default class GcalIntegration {
     if (!calendarId) calendarId = 'primary' // default calendar
 
     // Get a calendar instance
-    const calendar: calendar_v3.Calendar = google.calendar({ version: 'v3', auth: this.client })
+    const gcal: calendar_v3.Calendar = google.calendar({ version: 'v3', auth: this.CLIENT })
 
     // Check if the event already exists
     const event: void | calendar_v3.Schema$Event[] = (
-      await calendar.events.list({
+      await gcal.events.list({
         calendarId,
       })
     ).data.items
@@ -365,31 +396,7 @@ export default class GcalIntegration {
     if (event && event.length > 0 && event.find((e) => e.id === scheduleMessage.id)) {
       this.logger.info(`Event ${scheduleMessage.calendarEvent.title}  with id: ${scheduleMessage.id} already exists.`)
       // Update the event
-      const resource: calendar_v3.Schema$Event = {
-        id: scheduleMessage.id,
-        summary: scheduleMessage.calendarEvent.title,
-        location: scheduleMessage.calendarEvent.location,
-        description: scheduleMessage.calendarEvent.description,
-        start: {
-          dateTime: new Date(scheduleMessage.calendarEvent.start).toISOString(),
-          timeZone: 'Europe/Amsterdam',
-        },
-        end: {
-          dateTime: new Date(scheduleMessage.calendarEvent.end).toISOString(),
-          timeZone: 'Europe/Amsterdam',
-        },
-      }
-      const updatedEvent: void | GaxiosResponse<calendar_v3.Schema$Event> = await calendar.events
-        .update({
-          calendarId,
-          eventId: scheduleMessage.id,
-          requestBody: resource,
-        })
-        .catch((err: any) => {
-          this.logger.error(err)
-        })
-      this.logger.debug(`Event ${updatedEvent?.data?.summary} updated: ${updatedEvent?.data?.htmlLink}`)
-      return updatedEvent
+      return await this.updateCalendarEvent(scheduleMessage, calendarId)
     }
 
     // Create a new event resource
@@ -409,16 +416,52 @@ export default class GcalIntegration {
     }
 
     // Insert the event
-    const insertedEvent: void | GaxiosResponse<calendar_v3.Schema$Event> = await calendar.events
+    const insertedEvent: void | GaxiosResponse<calendar_v3.Schema$Event> = await gcal.events
       .insert({
         calendarId,
         requestBody: resource,
       })
       .catch((err: any) => {
+        if (err instanceof GaxiosError && err.status === 409) {
+          // Event already exists
+          this.logger.info(`Event ${scheduleMessage.calendarEvent?.title} already exists.`)
+          return
+        }
         this.logger.error(err)
       })
     this.logger.debug(`Event ${insertedEvent?.data?.summary} created: ${insertedEvent?.data?.htmlLink}`)
     return insertedEvent
+  }
+
+  async updateCalendarEvent(scheduleMessage: ScheduleMessage, calendarId?: string) {
+    // Get a calendar instance
+    const gcal: calendar_v3.Calendar = google.calendar({ version: 'v3', auth: this.CLIENT })
+
+    const resource: calendar_v3.Schema$Event = {
+      id: scheduleMessage.id,
+      summary: scheduleMessage.calendarEvent?.title,
+      location: scheduleMessage.calendarEvent?.location,
+      description: scheduleMessage.calendarEvent?.description,
+      start: {
+        dateTime: new Date(scheduleMessage.calendarEvent?.start).toISOString(),
+        timeZone: 'Europe/Amsterdam',
+      },
+      end: {
+        dateTime: new Date(scheduleMessage.calendarEvent?.end).toISOString(),
+        timeZone: 'Europe/Amsterdam',
+      },
+    }
+    const updatedEvent: void | GaxiosResponse<calendar_v3.Schema$Event> = await gcal.events
+      .update({
+        calendarId,
+        eventId: scheduleMessage.id,
+        requestBody: resource,
+      })
+      .catch((err: any) => {
+        this.logger.error(err)
+      })
+    this.logger.debug(`Event ${updatedEvent?.data?.summary} updated: ${updatedEvent?.data?.htmlLink}`)
+    return updatedEvent
   }
 
   async deleteEvent(eventId: string, calendarId?: string): Promise<void> {
@@ -429,7 +472,7 @@ export default class GcalIntegration {
         calendarList.items.forEach(async (event) => {
           if (event.id) {
             await this.deleteEvent(eventId, event.id).catch((err) => {
-              if (err instanceof GaxiosError && err.status === 404) {
+              if ((err instanceof GaxiosError && err.status === 404) || err.status === 409) {
                 // Just ignore 404 errors because we loop over all calendars
                 // without checking if the event exists in the calendar
               } else this.logger.error(err)
@@ -441,7 +484,7 @@ export default class GcalIntegration {
     }
 
     // Get a calendar instance
-    const calendar: calendar_v3.Calendar = google.calendar({ version: 'v3', auth: this.client })
+    const calendar: calendar_v3.Calendar = google.calendar({ version: 'v3', auth: this.CLIENT })
 
     // Delete the event
     await calendar.events
