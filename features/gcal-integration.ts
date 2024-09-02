@@ -34,7 +34,7 @@ export default class GcalIntegration {
   CREDENTIALS_PATH: string = path.join(process.cwd(), 'credentials.json')
 
   CLIENT: OAuth2Client | undefined
-  calendarIds: { [key: string]: string } = {}
+  CALENDAR_IDS: { [key: string]: string } = {}
 
   /**
    * Initializes the Google Calendar integration.
@@ -226,7 +226,7 @@ export default class GcalIntegration {
       if (mainCalendar) {
         this.logger.info('Main calendar exists.')
         if (mainCalendar && mainCalendar.id) {
-          this.calendarIds['main'] = mainCalendar.id
+          this.CALENDAR_IDS['main'] = mainCalendar.id
         } else {
           throw new Error('Could not retrieve main calendar ID.')
         }
@@ -243,7 +243,7 @@ export default class GcalIntegration {
         if (regionCalendar) {
           this.logger.info(`${region} calendar exists.`)
           if (regionCalendar && regionCalendar.id) {
-            this.calendarIds[region] = regionCalendar.id
+            this.CALENDAR_IDS[region] = regionCalendar.id
           } else {
             throw new Error(`Could not retrieve ${region} calendar ID.`)
           }
@@ -252,7 +252,7 @@ export default class GcalIntegration {
         }
       })
     }
-    this.logger.debug('Calendar IDs: ', this.calendarIds)
+    this.logger.debug('Calendar IDs: ', this.CALENDAR_IDS)
   }
 
   /**
@@ -281,7 +281,7 @@ export default class GcalIntegration {
     else {
       this.logger.debug('Main calendar created: %s', mainCalendarRes.data.id)
       if (mainCalendarRes.data && mainCalendarRes.data.id) {
-        this.calendarIds['main'] = mainCalendarRes.data.id
+        this.CALENDAR_IDS['main'] = mainCalendarRes.data.id
       } else {
         throw new Error('Could not retrieve main calendar ID.')
       }
@@ -316,7 +316,7 @@ export default class GcalIntegration {
     else {
       this.logger.debug(`${region} calendar created: %s`, regionCalendarRes.data.id)
       if (regionCalendarRes.data && regionCalendarRes.data.id) {
-        this.calendarIds[region] = regionCalendarRes.data.id
+        this.CALENDAR_IDS[region] = regionCalendarRes.data.id
       } else {
         throw new Error(`Could not retrieve ${region} calendar ID.`)
       }
@@ -329,7 +329,7 @@ export default class GcalIntegration {
    * @returns {Promise<void>}
    * @example createUserCalendar('username')
    */
-  async createUserCalendar(username: string) {
+  async createUserCalendar(username: string): Promise<calendar_v3.Schema$Calendar | void> {
     if (!this.CLIENT) throw new Error('Error: No client found, please initialize.')
     // Check if user calendar exists
     const calendars: void | calendar_v3.Schema$CalendarList = await this.listCalendars()
@@ -357,8 +357,13 @@ export default class GcalIntegration {
       .catch((err: any) => {
         this.logger.error(err)
       })
-    if (!userCalendarRes) this.logger.error(`Could not create ${username} calendar.`)
-    else this.logger.debug(`${username} calendar created: %s`, userCalendarRes.data.id)
+    if (!userCalendarRes || !userCalendarRes.data) {
+      this.logger.error(`Could not create ${username} calendar.`)
+      return
+    } else {
+      this.logger.debug(`${username} calendar created: %s`, userCalendarRes.data.id)
+      return userCalendarRes.data
+    }
   }
 
   /**
@@ -396,7 +401,7 @@ export default class GcalIntegration {
     if (event && event.length > 0 && event.find((e) => e.id === scheduleMessage.id)) {
       this.logger.info(`Event ${scheduleMessage.calendarEvent.title}  with id: ${scheduleMessage.id} already exists.`)
       // Update the event
-      return await this.updateCalendarEvent(scheduleMessage, calendarId)
+      return await this.updateEventFromScheduleMessage(scheduleMessage, calendarId)
     }
 
     // Create a new event resource
@@ -433,7 +438,7 @@ export default class GcalIntegration {
     return insertedEvent
   }
 
-  async updateCalendarEvent(scheduleMessage: ScheduleMessage, calendarId?: string) {
+  async updateEventFromScheduleMessage(scheduleMessage: ScheduleMessage, calendarId?: string) {
     // Get a calendar instance
     const gcal: calendar_v3.Calendar = google.calendar({ version: 'v3', auth: this.CLIENT })
 
@@ -451,6 +456,25 @@ export default class GcalIntegration {
         timeZone: 'Europe/Amsterdam',
       },
     }
+
+    // Check if calendarId is set, if not update event in all calendars
+    if (!calendarId) {
+      const calendarList = await this.listCalendars()
+      if (calendarList && calendarList.items) {
+        calendarList.items.forEach(async (calendar) => {
+          if (calendar.id) {
+            await this.updateEventFromScheduleMessage(scheduleMessage, calendar.id).catch((err) => {
+              if (err instanceof GaxiosError && err.status === 404) {
+                // Just ignore 404 errors because we loop over all calendars
+                // without checking if the event exists in the calendar
+              } else this.logger.error(err)
+            })
+          }
+        })
+      }
+      return
+    }
+
     const updatedEvent: void | GaxiosResponse<calendar_v3.Schema$Event> = await gcal.events
       .update({
         calendarId,
@@ -462,6 +486,44 @@ export default class GcalIntegration {
       })
     this.logger.debug(`Event ${updatedEvent?.data?.summary} updated: ${updatedEvent?.data?.htmlLink}`)
     return updatedEvent
+  }
+
+  async addEventToUserCalendar(scheduleMessage: ScheduleMessage, username: string) {
+    // Get the user calendar ID
+    const userCalendarId: string | null | undefined = (await this.checkUserCalendar(username))?.id
+    if (!userCalendarId) {
+      throw new Error(`Could not retrieve ${username} calendar ID.`)
+    }
+
+    // Create the event
+    return await this.createEventFromScheduleMessage(scheduleMessage, userCalendarId)
+  }
+
+  async removeEventFromUserCalendar(scheduleMessage: ScheduleMessage, username: string) {
+    // Get the user calendar ID
+    const userCalendarId: string | null | undefined = (await this.checkUserCalendar(username))?.id
+    if (!userCalendarId) {
+      throw new Error(`Could not retrieve ${username} calendar ID.`)
+    }
+
+    // Delete the event
+    return await this.deleteEvent(scheduleMessage.id, userCalendarId)
+  }
+
+  async checkUserCalendar(username: string): Promise<calendar_v3.Schema$Calendar | void> {
+    const calendars: void | calendar_v3.Schema$CalendarList = await this.listCalendars()
+    if (calendars && calendars.items && calendars.items.length > 0) {
+      let userCalendar: calendar_v3.Schema$Calendar | void = calendars.items.find((calendar) => {
+        return calendar.summary === `Rise Schedule - ${username}`
+      })
+      if (!userCalendar) {
+        userCalendar = await this.createUserCalendar(username)
+      }
+      if (userCalendar && userCalendar.id) {
+        this.CALENDAR_IDS[username] = userCalendar.id
+        return userCalendar
+      }
+    }
   }
 
   async deleteEvent(eventId: string, calendarId?: string): Promise<void> {

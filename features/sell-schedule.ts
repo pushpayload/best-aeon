@@ -67,7 +67,7 @@ export default function (
                 StartSellThread(sellMessage.content, sellMessage)
               }
               if (gcal.CLIENT)
-                await addToSchedule(sellMessage).catch((e) =>
+                await updateSchedule(sellMessage).catch((e) =>
                   logger.error(`Error while trying to add to schedule: ${e}`),
                 )
             }
@@ -108,7 +108,7 @@ export default function (
 
       if (region) {
         if (isSellMessage(message)) {
-          await addToSchedule(message)
+          await updateSchedule(message)
 
           await createMessages()
         }
@@ -159,7 +159,7 @@ export default function (
       }
 
       if (isSellMessage(updatedMessage)) {
-        await addToSchedule(updatedMessage)
+        await updateSchedule(updatedMessage)
 
         await createMessages()
       }
@@ -223,15 +223,23 @@ export default function (
   client.on('messageReactionAdd', async (reaction, user) => {
     const matchingHistoryItem = schedule.find((item) => item.id === reaction.message.id)
 
+    logger.debug(
+      `Reaction added: ${reaction.emoji.name} [${reaction.emoji.id}], user: ${user.username}, in schedule: ${!!matchingHistoryItem}`,
+    )
+
     if (!matchingHistoryItem || reaction.emoji.id !== MCMysticCoinEmoji) {
       return
     }
-
     matchingHistoryItem.reactorIds.push(user.id)
+    updateSchedule(await reaction.message.fetch())
   })
 
   client.on('messageReactionRemove', async (reaction, user) => {
     const matchingHistoryItem = schedule.find((item) => item.id === reaction.message.id)
+
+    logger.debug(
+      `Reaction removed: ${reaction.emoji.name} [${reaction.emoji.id}], user: ${user.username}, in schedule: ${!!matchingHistoryItem}`,
+    )
 
     if (!matchingHistoryItem || reaction.emoji.id !== MCMysticCoinEmoji) {
       return
@@ -241,24 +249,13 @@ export default function (
     if (index > -1) {
       // only splice array when item is found
       matchingHistoryItem.reactorIds.splice(index, 1) // 2nd parameter means remove one item only
+      updateSchedule(await reaction.message.fetch())
     }
   })
 
-  async function addToSchedule(message: Message<boolean>) {
+  async function updateSchedule(message: Message<boolean>) {
     // Parse the message
     const scheduleMessage: ScheduleMessage = await scheduleMessageParser.parseScheduleMessage(message, client)
-
-    // Create/update the calendar event
-    if (gcal.CLIENT) {
-      await gcal.createEventFromScheduleMessage(scheduleMessage, gcal.calendarIds['main']).catch((e) => {
-        logger.error(`Error while trying to create event: ${e}`)
-      })
-      await gcal
-        .createEventFromScheduleMessage(scheduleMessage, gcal.calendarIds[scheduleMessage.region])
-        .catch((e) => {
-          logger.error(`Error while trying to create event: ${e}`)
-        })
-    }
 
     // Check if the message is already in the schedule
     const messageIndex = schedule.findIndex((oldmessage) => oldmessage.id === message.id)
@@ -267,10 +264,37 @@ export default function (
     if (messageIndex !== -1) {
       schedule[messageIndex].date = scheduleMessage.date
       schedule[messageIndex].text = scheduleMessage.text
+
+      // Update the calendar event
+      if (gcal.CLIENT) {
+        await gcal.updateEventFromScheduleMessage(schedule[messageIndex]).catch((e) => {
+          logger.error(`Error while trying to update event: ${e}`)
+        })
+        // Add the event to all reactors' calendars
+        for (const reactorId of schedule[messageIndex].reactorIds) {
+          const reactor = await client.users.fetch(reactorId)
+          await gcal.addEventToUserCalendar(schedule[messageIndex], reactor.username).catch((e) => {
+            logger.error(`Error while trying to add event to user calendar: ${e}`)
+          })
+        }
+      }
       return
     }
+
     // If it isn't, add it to the schedule
     schedule.push(scheduleMessage)
+
+    // Create/update the calendar event
+    if (gcal.CLIENT) {
+      await gcal.createEventFromScheduleMessage(scheduleMessage, gcal.CALENDAR_IDS['main']).catch((e) => {
+        logger.error(`Error while trying to create event: ${e}`)
+      })
+      await gcal
+        .createEventFromScheduleMessage(scheduleMessage, gcal.CALENDAR_IDS[scheduleMessage.region])
+        .catch((e) => {
+          logger.error(`Error while trying to create event: ${e}`)
+        })
+    }
   }
 
   async function createMessages() {
