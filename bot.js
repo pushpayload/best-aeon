@@ -47,7 +47,7 @@ client.once('ready', async () => {
 
   // Load google calendar integration
   await gcal.initialize().catch((e) => logger.error(`Error while trying to initialize gcal: ${e}`))
-  if (gcal.CLIENT) {
+  if (gcal.clientIsValid()) {
     await gcal.listEvents().catch((e) => logger.error(`Error while trying to list events: ${e}`))
     await gcal.listCalendars().catch((e) => logger.error(`Error while trying to list calendars: ${e}`))
     await gcal.setupCalendars().catch((e) => logger.error(`Error while trying to setup calendars: ${e}`))
@@ -122,7 +122,12 @@ client.on('messageCreate', async (message) => {
 })
 
 client.on('messageReactionAdd', async (reaction, user) => {
+  logger.debug(`Reaction added: ${reaction.emoji.name} by ${user.username}`)
   await AddToThread(reaction, user)
+})
+
+client.on('messageReactionRemove', async (reaction, user) => {
+  logger.debug(`Reaction removed: ${reaction.emoji.name} by ${user.username}`)
 })
 
 client.on(Events.InteractionCreate, async (interaction) => {

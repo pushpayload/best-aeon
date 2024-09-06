@@ -66,7 +66,7 @@ export default function (
               if (!sellMessage.hasThread) {
                 StartSellThread(sellMessage.content, sellMessage)
               }
-              if (gcal.CLIENT)
+              if (gcal.clientIsValid())
                 await updateSchedule(sellMessage).catch((e) =>
                   logger.error(`Error while trying to add to schedule: ${e}`),
                 )
@@ -130,7 +130,8 @@ export default function (
     }
 
     schedule.splice(index, 1)
-    if (gcal.CLIENT) gcal.deleteEvent(message.id).catch((e) => logger.error(`Error while trying to delete event: ${e}`))
+    if (gcal.clientIsValid())
+      gcal.deleteEvent(message.id).catch((e) => logger.error(`Error while trying to delete event: ${e}`))
 
     await createMessages()
   })
@@ -144,7 +145,7 @@ export default function (
       }
 
       schedule.splice(index, 1)
-      if (gcal.CLIENT)
+      if (gcal.clientIsValid())
         gcal.deleteEvent(message.id).catch((e) => logger.error(`Error while trying to delete event: ${e}`))
     })
 
@@ -201,7 +202,7 @@ export default function (
           })
         } else {
           await interaction.editReply({
-            content: getPrunedOutput(result, true, true)[0].join('\r\n\r\n'),
+            content: getPrunedOutput(result, true, false)[0].join('\r\n\r\n'),
           })
         }
       }
@@ -266,7 +267,7 @@ export default function (
       schedule[messageIndex].text = scheduleMessage.text
 
       // Update the calendar event
-      if (gcal.CLIENT) {
+      if (gcal.clientIsValid()) {
         await gcal.updateEventFromScheduleMessage(schedule[messageIndex]).catch((e) => {
           logger.error(`Error while trying to update event: ${e}`)
         })
@@ -285,12 +286,12 @@ export default function (
     schedule.push(scheduleMessage)
 
     // Create/update the calendar event
-    if (gcal.CLIENT) {
-      await gcal.createEventFromScheduleMessage(scheduleMessage, gcal.CALENDAR_IDS['main']).catch((e) => {
+    if (gcal.clientIsValid()) {
+      await gcal.createEventFromScheduleMessage(scheduleMessage, gcal.getCalendarIds()['main']).catch((e) => {
         logger.error(`Error while trying to create event: ${e}`)
       })
       await gcal
-        .createEventFromScheduleMessage(scheduleMessage, gcal.CALENDAR_IDS[scheduleMessage.region])
+        .createEventFromScheduleMessage(scheduleMessage, gcal.getCalendarIds()[scheduleMessage.region])
         .catch((e) => {
           logger.error(`Error while trying to create event: ${e}`)
         })
