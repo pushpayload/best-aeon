@@ -16,7 +16,6 @@ import {
   Interaction,
   CacheType,
 } from 'discord.js'
-import translations from '../constants/translations.ts'
 import { Language } from '../constants/buyerManagementLanguages.ts'
 import { Logger } from '../helpers/logger.ts'
 
@@ -27,15 +26,23 @@ interface LanguageByChannel {
 interface PingByUser {
   [key: string]: number
 }
-
 const logger = new Logger({ functionName: 'BuyerManagement' })
 
-export default function setup() {
-  const contactedCategoryChannelId = process.env.CONTACTED_CATEGORY_CHANNEL_ID!
-  const buyerManagementChannelId = process.env.BUYER_MANAGEMENT_CHANNEL_ID!
-  const guildId = process.env.GUILD_ID!
-  const roleName = '[Rise] LFG'
-
+export default function setup({
+  guildTag,
+  guildId,
+  managerToken,
+  contactedCategoryChannelId,
+  buyerManagementChannelId,
+  previousBuyersChannelId,
+  priceEmbedChannelId,
+  embedRaidBoss,
+  embedRaidAchievements,
+  embedFractals,
+  embedStrikes,
+  botRoleId,
+  translations,
+}: BuyerManagementSettings) {
   const languageByChannel: LanguageByChannel = {}
   const lastCtaPings: PingByUser = {}
 
@@ -51,9 +58,9 @@ export default function setup() {
     partials: [Partials.Message, Partials.Channel, Partials.Reaction],
   })
 
-  client.login(process.env.MANAGER_TOKEN)
+  client.login(managerToken)
 
-  client.once('ready', () => {
+  client.once('ready', async () => {
     logger.info(`Logged in as ${client.user?.tag}`)
   })
 
@@ -86,7 +93,7 @@ export default function setup() {
         targetChannel = c as CategoryChannel
       }
 
-      const adminRole = member.guild.roles.cache.find((role) => role.name === roleName)
+      const adminRole = member.guild.roles.cache.find((role) => role.name.includes('LFG'))
 
       if (!adminRole) {
         return
@@ -119,7 +126,7 @@ export default function setup() {
       const languageRow = new ActionRowBuilder<ButtonBuilder>().addComponents(english, french, german, spanish)
 
       await channel.send({
-        content: `Hello and welcome to [Rise] ${userMention(member.id)}! 🌟
+        content: `Hello and welcome to [${guildTag}] ${userMention(member.id)}! 🌟
   
 I am a bot, here to assist you in finding and purchasing Guild Wars 2 services. Let's get started!
 
@@ -156,7 +163,7 @@ I am a bot, here to assist you in finding and purchasing Guild Wars 2 services. 
       const parentName = userChannel.parent?.name.toLowerCase()
 
       if (parentName?.includes('scheduled')) {
-        const previousBuyersChannel = channels.get(process.env.PREVIOUS_BUYERS_CHANNEL!) as TextChannel | undefined
+        const previousBuyersChannel = channels.get(previousBuyersChannelId) as TextChannel | undefined
 
         if (previousBuyersChannel) {
           previousBuyersChannel.send(`${member.user.username} -- ${getLanguage(userChannel.id)} -- ${parentName}`)
@@ -216,13 +223,13 @@ I am a bot, here to assist you in finding and purchasing Guild Wars 2 services. 
         let embed
 
         if (id === 'raid-boss') {
-          embed = await readPriceEmbed(process.env.EMBED_RAID_BOSS!)
+          embed = await readPriceEmbed(embedRaidBoss)
         } else if (id === 'raid-achievements') {
-          embed = await readPriceEmbed(process.env.EMBED_RAID_ACHIEVEMENTS!)
+          embed = await readPriceEmbed(embedRaidAchievements)
         } else if (id === 'strikes') {
-          embed = await readPriceEmbed(process.env.EMBED_STRIKES!)
+          embed = await readPriceEmbed(embedStrikes)
         } else if (id === 'fractals') {
-          embed = await readPriceEmbed(process.env.EMBED_FRACTALS!)
+          embed = await readPriceEmbed(embedFractals)
         }
 
         if (!embed) {
@@ -410,7 +417,7 @@ I am a bot, here to assist you in finding and purchasing Guild Wars 2 services. 
           allow: ['ViewChannel'],
         },
         {
-          id: process.env.BOT_ROLE_ID!,
+          id: botRoleId,
           allow: ['ViewChannel'],
         },
         {
@@ -424,8 +431,6 @@ I am a bot, here to assist you in finding and purchasing Guild Wars 2 services. 
   async function onManagementInteract(interaction: Interaction<CacheType>) {
     const buttonInteraction = interaction as ButtonInteraction
     const message = buttonInteraction.message
-    const channelId = message.content.match(/<#(\d+)>/)![1]
-    const channel = client.channels.cache.get(channelId) as TextChannel
 
     if (buttonInteraction.customId === 'management-dibs') {
       if (!message.content.includes('Contacted by')) {
@@ -450,7 +455,7 @@ I am a bot, here to assist you in finding and purchasing Guild Wars 2 services. 
   }
 
   async function readPriceEmbed(messageId: string) {
-    const channel = client.channels.cache.get(process.env.PRICE_EMBED_CHANNEL!)
+    const channel = client.channels.cache.get(priceEmbedChannelId)
 
     if (!channel || !(channel instanceof TextChannel)) {
       return null

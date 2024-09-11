@@ -22,7 +22,7 @@ const scheduleMessageParser: ScheduleMessageParser = new ScheduleMessageParser()
 
 export default function (
   client: Client,
-  scheduleChannelIds: [{ id: string; regions: string[] }],
+  scheduleChannelIds: { id: string; regions: string[] }[],
   gcal: GcalIntegration,
 ) {
   const q = new Queue({ autostart: true, concurrency: 1 })
@@ -51,27 +51,31 @@ export default function (
 
       for (const sellChannelId in sellChannels) {
         logger.debug(`sellChannelId: ${sellChannelId}, region: ${sellChannels[sellChannelId].region}`)
-        const sellChannel = await client.channels.fetch(sellChannelId)
+        try {
+          const sellChannel = await client.channels.fetch(sellChannelId)
 
-        if (sellChannel && sellChannel instanceof TextChannel) {
-          let sellMessages = await sellChannel.messages
-            .fetch()
-            .then((messages) => messages.filter((message) => isSellMessage(message)))
+          if (sellChannel && sellChannel instanceof TextChannel) {
+            let sellMessages = await sellChannel.messages
+              .fetch()
+              .then((messages) => messages.filter((message) => isSellMessage(message)))
 
-          if (sellMessages) {
-            for (const sellMessage of sellMessages.values()) {
-              if (sellMessage.partial) {
-                await sellMessage.fetch()
+            if (sellMessages) {
+              for (const sellMessage of sellMessages.values()) {
+                if (sellMessage.partial) {
+                  await sellMessage.fetch()
+                }
+                if (!sellMessage.hasThread) {
+                  StartSellThread(sellMessage.content, sellMessage)
+                }
+                if (gcal.clientIsValid())
+                  await updateSchedule(sellMessage).catch((e) =>
+                    logger.error(`Error while trying to add to schedule: ${e}`),
+                  )
               }
-              if (!sellMessage.hasThread) {
-                StartSellThread(sellMessage.content, sellMessage)
-              }
-              if (gcal.clientIsValid())
-                await updateSchedule(sellMessage).catch((e) =>
-                  logger.error(`Error while trying to add to schedule: ${e}`),
-                )
             }
           }
+        } catch (e: any) {
+          continue
         }
       }
 
