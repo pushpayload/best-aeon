@@ -16,8 +16,8 @@ import {
   Interaction,
   CacheType,
 } from 'discord.js'
-import { Language } from '../constants/buyerManagementLanguages.ts'
-import { Logger } from '../helpers/logger.ts'
+import { Language } from '../../constants/buyerManagementLanguages.ts'
+import AutomaticallyClearUsers from './clear-users.ts'
 
 interface LanguageByChannel {
   [key: string]: string
@@ -26,7 +26,6 @@ interface LanguageByChannel {
 interface PingByUser {
   [key: string]: number
 }
-const logger = new Logger({ functionName: 'BuyerManagement' })
 
 export default function setup({
   guildTag,
@@ -61,7 +60,9 @@ export default function setup({
   client.login(managerToken)
 
   client.once('ready', async () => {
-    logger.info(`Logged in as ${client.user?.tag}`)
+    console.log(`Logged in as ${client.user?.tag}`)
+
+    AutomaticallyClearUsers(client, guildId)
   })
 
   client.on('guildMemberAdd', async (member) => {
@@ -86,7 +87,7 @@ export default function setup({
         const c = categoryChannels.at(index)
 
         if (!c) {
-          logger.error('--- ERROR: Ran out of channels to put new members under! ---')
+          console.error('--- ERROR: Ran out of channels to put new members under! ---')
           return
         }
 
@@ -108,7 +109,7 @@ export default function setup({
       }
 
       if (!channel) {
-        logger.error(`--- Failed to create channel for user! ${member.displayName} ---`)
+        console.error(`--- Failed to create channel for user! ${member.displayName} ---`)
         return
       }
 
@@ -127,15 +128,15 @@ export default function setup({
 
       await channel.send({
         content: `Hello and welcome to [${guildTag}] ${userMention(member.id)}! 🌟
-  
+
 I am a bot, here to assist you in finding and purchasing Guild Wars 2 services. Let's get started!
 
 **__STEP 1: Choose a Language, Elige un idioma, Wähle eine Sprache, Choisir une langue 🌐__**`,
         components: [languageRow],
       })
     } catch (e) {
-      logger.error(`--- something failed when setting up for ${member.displayName} ---`)
-      logger.error(e)
+      console.error(`--- something failed when setting up for ${member.displayName} ---`)
+      console.error(e)
     }
   })
 
@@ -156,7 +157,7 @@ I am a bot, here to assist you in finding and purchasing Guild Wars 2 services. 
       })
 
       if (!userChannel) {
-        logger.log(`${member.user.displayName} left but could not find a channel for them.`)
+        console.log(`${member.user.displayName} left but could not find a channel for them.`)
         return
       }
 
@@ -171,18 +172,19 @@ I am a bot, here to assist you in finding and purchasing Guild Wars 2 services. 
       }
 
       try {
-        userChannel.edit({
+        await userChannel.edit({
           name: `🚩goodbye-${member.displayName}`,
           position: userChannel.parent!.children.cache.size - 1,
         })
       } catch {
-        userChannel.edit({
+        await userChannel.edit({
           name: `🚩goodbye`,
           position: userChannel.parent!.children.cache.size - 1,
         })
       }
-    } catch (e) {
-      logger.error(e)
+    } catch (e: any) {
+      console.error('[Error] During cleanup after user leave;')
+      console.error(e.message)
     }
   })
 
@@ -207,15 +209,15 @@ I am a bot, here to assist you in finding and purchasing Guild Wars 2 services. 
         id === 'go-back'
       ) {
         if (id !== 'go-back') {
-          setLanguage(interaction)
+          await setLanguage(interaction)
         }
 
-        postSellTypes(interaction)
+        await postSellTypes(interaction)
         return
       }
 
       if (id === 'raids') {
-        postRaidList(interaction)
+        await postRaidList(interaction)
         return
       }
 
@@ -233,7 +235,7 @@ I am a bot, here to assist you in finding and purchasing Guild Wars 2 services. 
         }
 
         if (!embed) {
-          interaction.reply({
+          await interaction.reply({
             content: getTranslation('generic_error', interaction),
             ephemeral: true,
           })
@@ -245,7 +247,7 @@ I am a bot, here to assist you in finding and purchasing Guild Wars 2 services. 
           ephemeral: true,
         })
 
-        postCTA(interaction)
+        await postCTA(interaction)
         return
       }
 
@@ -256,7 +258,7 @@ I am a bot, here to assist you in finding and purchasing Guild Wars 2 services. 
           return
         }
 
-        interaction.reply({
+        await interaction.reply({
           content: getTranslation('staff_called', interaction),
           ephemeral: true,
         })
@@ -271,26 +273,25 @@ I am a bot, here to assist you in finding and purchasing Guild Wars 2 services. 
 
           const row = new ActionRowBuilder<ButtonBuilder>().addComponents(callDibs)
 
-          buyerManagementChannel.send({
-            content: `@here The buyer at ${channelMention(interaction.channelId)} clicked on ${id}.
-  Their preferred language is ${getLanguagePrettyPrint(interaction)}`,
+          await buyerManagementChannel.send({
+            content: `@here The buyer at ${channelMention(interaction.channelId)} clicked on ${id}.\rTheir preferred language is ${getLanguagePrettyPrint(interaction)}`,
             components: [row],
           })
         }
         return
       }
     } catch (e: any) {
-      logger.error(e.rawError?.message || 'Something went wrong?')
-      logger.error(e)
+      console.error(e.rawError?.message || 'Something went wrong?')
+      console.error(e)
 
       try {
-        interaction.reply({
+        await interaction.reply({
           content: getTranslation('generic_error', interaction),
           ephemeral: true,
         })
         return
       } catch {
-        logger.error('--- ERROR: Was not allowed to reply to interaction ---')
+        console.error('--- ERROR: Was not allowed to reply to interaction ---')
       }
     }
   })

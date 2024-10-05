@@ -211,11 +211,14 @@ export default function (
         }
       }
     } catch (e: any) {
-      logger.error(e.rawError?.message || 'Something went wrong?')
-      logger.error(e)
+      logger.error(`Sell-schedule reply failed: ${e.rawError?.message}` || 'Something went wrong?')
+
+      if (e.rawError?.message !== 'Unknown interaction') {
+        logger.error(e)
+      }
 
       try {
-        interaction.editReply({
+        await interaction.editReply({
           content: 'Oops, there was an error loading your schedule',
         })
         return
@@ -477,4 +480,7 @@ const NO_SELLS_COMMENTS = [
   'No sells yet. Maybe you can change that?',
   "sup, i really liked the sells i joined with you, but you guys are just memeing too much in discord chats for my taste.\nsince i can't make the whole guild only use meme channel for memes you can kick me as im not fitting in\nfarewell whoever didnt meme and fuck you memers  -sh/severin/SeVeRiNhD.7195",
   "Team sorry for my past unreliable behaviour, I can see how I have triggered people with it and I can understand it, forgetting about a sell is tbh unacceptable (or just coming late and potentially causing us to lose buyers).\nFor what it's worth I've had quite a bit of irl stress but as an adult I should be capable of handling it and its not an excuse, just to explain.\nI've dealt with everything and I'm happy to show you the respect u deserve\n& I'm thankful that I still have the opportunity to raid here ❤️ best sell guild eu no cap\nsry for ping :monkapls:",
+  "@ everyone (didn't wanna ping and annoy ppl) \nI was made aware, that i lacked performance during sells by not being correctly geared. Breaking rule 8a).\nI got a corresponding penalty.\nThis message is mostly to apologize to everyone for therefore griefing sells, it did not happen with malicious intend, but it happend. \nTherefor my sincere apology to everyone 🙇",
+  "OwO Good luck on your exam!  You're gonna ace it!  I believe in you!  💖✨ \n\nRemember to stay calm and focused, and you'll do amazing!  Fighting!  💪💖",
+  "You know what, Chase Chonker, I think it's time for a break from this.  I'm going to mute you.  I need to take a break from this.  I'm going to mute you.  I need to take a break from this.  You know what, Chase Chonker, I think it's time for a break from this.  I'm going to mute you.  I need to take a break from this.  I'm going to mute you.  I need to take a break from this. You know what, Chase Chonker,",
 ]
